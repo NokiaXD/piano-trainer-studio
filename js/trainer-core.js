@@ -96,9 +96,19 @@ function setFollowPracticeHand(hand) {
 }
 
 
+function syncNoteNameSystemButton() {
+    const button = document.getElementById('btn-note-name-system');
+    if (!button) return;
+    button.textContent = AppState.noteNamesSolfege ? 'Notation: Do Re Mi' : 'Notation: A B C';
+    button.setAttribute('aria-pressed', String(AppState.noteNamesSolfege));
+}
+
 function applyPersistedTrainerAndSettingsPreferences() {
     AppState.mode = localStorage.getItem(TRAINER_MODE_STORAGE_KEY) || 'realtime';
     AppState.feedbackEnabled = getStoredBool(TRAINER_FEEDBACK_STORAGE_KEY, true);
+    AppState.noteNamesEnabled = getStoredBool(TRAINER_NOTE_NAMES_STORAGE_KEY, false);
+    AppState.noteNamesSolfege = getStoredBool(TRAINER_NOTE_NAMES_SOLFEGE_STORAGE_KEY, false);
+    AppState.hideUnassignedStaves = getStoredBool(TRAINER_ASSIGNED_STAVES_ONLY_STORAGE_KEY, false);
     AppState.futurePreviewEnabled = getStoredBool(TRAINER_FUTURE_PREVIEW_STORAGE_KEY, true);
     AppState.futurePreviewDepth = 1;
     AppState.correctHighlightEnabled = getStoredBool(TRAINER_CORRECT_HIGHLIGHT_STORAGE_KEY, true);
@@ -135,6 +145,13 @@ function applyPersistedTrainerAndSettingsPreferences() {
 
     const feedbackCheckbox = document.getElementById('check-feedback');
     if (feedbackCheckbox) feedbackCheckbox.checked = AppState.feedbackEnabled;
+
+    const noteNamesCheckbox = document.getElementById('check-note-names');
+    if (noteNamesCheckbox) noteNamesCheckbox.checked = AppState.noteNamesEnabled;
+    syncNoteNameSystemButton();
+
+    const assignedStavesOnlyCheckbox = document.getElementById('check-assigned-staves-only');
+    if (assignedStavesOnlyCheckbox) assignedStavesOnlyCheckbox.checked = AppState.hideUnassignedStaves;
 
     const futurePreviewCheckbox = document.getElementById('check-future-preview');
     if (futurePreviewCheckbox) futurePreviewCheckbox.checked = AppState.futurePreviewEnabled;
@@ -241,6 +258,15 @@ function restoreDefaultPreferences({ reloadDevices = true } = {}) {
     AppState.feedbackEnabled = true;
     const feedbackCheckbox = document.getElementById('check-feedback');
     if (feedbackCheckbox) feedbackCheckbox.checked = true;
+
+    AppState.noteNamesEnabled = false;
+    AppState.noteNamesSolfege = false;
+    AppState.hideUnassignedStaves = false;
+    const noteNamesCheckbox = document.getElementById('check-note-names');
+    if (noteNamesCheckbox) noteNamesCheckbox.checked = false;
+    syncNoteNameSystemButton();
+    const assignedStavesOnlyCheckbox = document.getElementById('check-assigned-staves-only');
+    if (assignedStavesOnlyCheckbox) assignedStavesOnlyCheckbox.checked = false;
 
     AppState.futurePreviewEnabled = true;
     const futurePreviewCheckbox = document.getElementById('check-future-preview');
@@ -368,7 +394,7 @@ function restoreDefaultPreferences({ reloadDevices = true } = {}) {
     if (assignLeft) assignLeft.value = formatStaffAssignmentValue(defaults.left);
     const assignRight = document.getElementById('assign-rh');
     if (assignRight) assignRight.value = formatStaffAssignmentValue(defaults.right);
-    syncHandAssignmentFromControls();
+    syncHandAssignmentFromControls({ refreshCurrentFrame: true });
 
     applyModeSettings();
     syncLedBrightnessControls();
@@ -1324,9 +1350,11 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
 
 
 let globalStaffIdentityMap = new Map();
+let originalStaffVisibilityMap = new WeakMap();
 
 function rebuildGlobalStaffIdentityMap() {
     globalStaffIdentityMap = new Map();
+    originalStaffVisibilityMap = new WeakMap();
 
     const instruments = osmd?.Sheet?.Instruments || osmd?.Sheet?.instruments || [];
     let nextGlobalStaffId = 1;
@@ -1336,9 +1364,62 @@ function rebuildGlobalStaffIdentityMap() {
         staves.forEach(staff => {
             if (staff && !globalStaffIdentityMap.has(staff)) {
                 globalStaffIdentityMap.set(staff, nextGlobalStaffId++);
+                originalStaffVisibilityMap.set(staff, staff.Visible !== false);
             }
         });
     });
+}
+
+function getVisibleStaffIndexForAssignmentId(staffId) {
+    const targetId = Number(staffId);
+    if (!Number.isFinite(targetId)) return null;
+
+    const instruments = osmd?.Sheet?.Instruments || osmd?.Sheet?.instruments || [];
+    let visibleIndex = 0;
+
+    for (const instrument of instruments) {
+        const instrumentVisible = instrument?.Visible !== false;
+        const staves = instrument?.Staves || instrument?.staves || instrument?.Staffs || instrument?.staffs || [];
+        for (const staff of staves) {
+            if (!instrumentVisible || staff?.Visible === false) continue;
+            if (globalStaffIdentityMap.get(staff) === targetId) return visibleIndex;
+            visibleIndex++;
+        }
+    }
+
+    return null;
+}
+
+function applyAssignedStaffVisibility() {
+    const instruments = osmd?.Sheet?.Instruments || osmd?.Sheet?.instruments || [];
+    if (instruments.length === 0) return false;
+
+    const selectedStaffIds = new Set([AppState.hands.left, AppState.hands.right]
+        .map(Number)
+        .filter(Number.isFinite));
+    let changed = false;
+
+    instruments.forEach(instrument => {
+        const staves = instrument?.Staves || instrument?.staves || instrument?.Staffs || instrument?.staffs || [];
+        staves.forEach(staff => {
+            const originalVisible = originalStaffVisibilityMap.get(staff) !== false;
+            const assigned = selectedStaffIds.has(globalStaffIdentityMap.get(staff));
+            const nextVisible = originalVisible && (!AppState.hideUnassignedStaves || assigned);
+            if (staff.Visible !== nextVisible) {
+                staff.Visible = nextVisible;
+                changed = true;
+            }
+        });
+    });
+
+    if (changed && typeof osmd.updateGraphic === 'function') {
+        AppState.activeNoteLabels = [];
+        osmd.updateGraphic();
+        renderScoreAndRefreshGeometry();
+        osmd.cursor?.update();
+    }
+
+    return changed;
 }
 
 function getResolvedStaffAssignmentIdFromNote(note) {
@@ -1369,6 +1450,7 @@ function getResolvedStaffAssignmentIdFromEntry(entry) {
 window.getResolvedStaffAssignmentIdFromNote = getResolvedStaffAssignmentIdFromNote;
 window.getResolvedStaffAssignmentIdFromEntry = getResolvedStaffAssignmentIdFromEntry;
 window.getAssignedHandRoleForStaff = getAssignedHandRoleForStaff;
+window.getVisibleStaffIndexForAssignmentId = getVisibleStaffIndexForAssignmentId;
 
 function syncHandAssignmentFromControls({ refreshCurrentFrame = false } = {}) {
     const lhAssign = document.getElementById('assign-lh');
@@ -1383,6 +1465,7 @@ function syncHandAssignmentFromControls({ refreshCurrentFrame = false } = {}) {
     AppState.hands.right = nextRight;
     AppState.ledPreviewTimelineDirty = true;
     AppState.lastLedPreviewEvents = [];
+    applyAssignedStaffVisibility();
 
     if (!refreshCurrentFrame || !osmd?.cursor?.Iterator) {
         renderVirtualKeyboard();
@@ -1395,11 +1478,14 @@ function syncHandAssignmentFromControls({ refreshCurrentFrame = false } = {}) {
 
     if (entries.length > 0 && currentMeasureIdx != null) {
         buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimestamp);
+        renderFeedbackOverlay();
         renderVirtualKeyboard(entries, currentMeasureIdx, currentTimestamp);
     } else {
         AppState.expectedNotes = [];
+        AppState.activeNoteLabels = [];
         AppState.visualNotesToStart = [];
         AppState.outOfRangeCurrentNotes = [];
+        renderFeedbackOverlay();
         renderVirtualKeyboard();
     }
 }
@@ -2288,6 +2374,7 @@ function clearVisuals() {
     AppState.sustainedVisuals = [];
     AppState.visualNotesToStart = [];
     AppState.expectedNotes = [];
+    AppState.activeNoteLabels = [];
     AppState.outOfRangeCurrentNotes = [];
     AppState.activeHeldIncorrectFeedback.clear();
     AppState.releasedIncorrectFeedback = [];
@@ -2924,15 +3011,39 @@ document.getElementById('check-keyboard').addEventListener('change', (e) => {
 document.getElementById('check-feedback').addEventListener('change', (e) => {
     AppState.feedbackEnabled = e.target.checked;
     setStoredBool(TRAINER_FEEDBACK_STORAGE_KEY, AppState.feedbackEnabled);
-    if (!e.target.checked) {
-        GeometryEngine.clearSvgFeedback();
-    } else {
-        renderFeedbackOverlay();
-    }
+    renderFeedbackOverlay();
     if (typeof window.syncSettingsDebugVisibility === 'function') {
         window.syncSettingsDebugVisibility();
     }
 });
+
+const noteNamesCheckbox = document.getElementById('check-note-names');
+if (noteNamesCheckbox) {
+    noteNamesCheckbox.addEventListener('change', (e) => {
+        AppState.noteNamesEnabled = e.target.checked;
+        setStoredBool(TRAINER_NOTE_NAMES_STORAGE_KEY, AppState.noteNamesEnabled);
+        syncHandAssignmentFromControls({ refreshCurrentFrame: true });
+    });
+}
+
+const noteNameSystemButton = document.getElementById('btn-note-name-system');
+if (noteNameSystemButton) {
+    noteNameSystemButton.addEventListener('click', () => {
+        AppState.noteNamesSolfege = !AppState.noteNamesSolfege;
+        setStoredBool(TRAINER_NOTE_NAMES_SOLFEGE_STORAGE_KEY, AppState.noteNamesSolfege);
+        syncNoteNameSystemButton();
+        renderFeedbackOverlay();
+    });
+}
+
+const assignedStavesOnlyCheckbox = document.getElementById('check-assigned-staves-only');
+if (assignedStavesOnlyCheckbox) {
+    assignedStavesOnlyCheckbox.addEventListener('change', (e) => {
+        AppState.hideUnassignedStaves = e.target.checked;
+        setStoredBool(TRAINER_ASSIGNED_STAVES_ONLY_STORAGE_KEY, AppState.hideUnassignedStaves);
+        syncHandAssignmentFromControls({ refreshCurrentFrame: true });
+    });
+}
 
 document.querySelectorAll('input[name="practice-mode"]').forEach((radio) => {
     radio.addEventListener('change', (e) => {
@@ -3235,11 +3346,14 @@ function clearTransientPlaybackState({ clearVisualState = false } = {}) {
     AppState.earlyGraceReservations.clear();
     AppState.isAudioBusy = false;
     AppState.expectedNotes = [];
+    AppState.activeNoteLabels = [];
     AppState.realtimeWrongPressInCurrentContext = false;
     AppState.preExpectedHeldNotes.clear();
 
     if (clearVisualState) {
         clearVisuals();
+    } else {
+        renderFeedbackOverlay();
     }
 }
 

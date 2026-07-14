@@ -46,7 +46,8 @@ const AppState = {
     midiOutEnabled: { hands: false, other: false, instrument: false, virtual: false }, 
     midiOutVolume: 65,
     midiInBoost: 100,
-    expectedNotes: [], 
+    expectedNotes: [],
+    activeNoteLabels: [],
     pressedKeys: new Set(), 
     heldCorrectNotes: new Map(), 
     preExpectedHeldNotes: new Set(), 
@@ -56,6 +57,9 @@ const AppState = {
     realtimeWrongPressInCurrentContext: false,
     pendingAudio: [], 
     feedbackEnabled: true,
+    noteNamesEnabled: false,
+    noteNamesSolfege: false,
+    hideUnassignedStaves: false,
     anchorTime: 0,
     score: { correct: 0, wrong: 0 },
     
@@ -162,6 +166,9 @@ const LED_CALIBRATION_STORAGE_KEY = 'pt_ledCalibration';
 
 const TRAINER_MODE_STORAGE_KEY = 'pt_trainerMode';
 const TRAINER_FEEDBACK_STORAGE_KEY = 'pt_feedbackEnabled';
+const TRAINER_NOTE_NAMES_STORAGE_KEY = 'pt_noteNamesEnabled';
+const TRAINER_NOTE_NAMES_SOLFEGE_STORAGE_KEY = 'pt_noteNamesSolfege';
+const TRAINER_ASSIGNED_STAVES_ONLY_STORAGE_KEY = 'pt_assignedStavesOnly';
 const TRAINER_FUTURE_PREVIEW_STORAGE_KEY = 'pt_futurePreviewEnabled';
 const TRAINER_FUTURE_DEPTH_STORAGE_KEY = 'pt_futurePreviewDepth';
 const TRAINER_CORRECT_HIGHLIGHT_STORAGE_KEY = 'pt_correctHighlightEnabled';
@@ -273,6 +280,9 @@ const RESETTABLE_PREFERENCE_KEYS = [
     LED_CALIBRATION_STORAGE_KEY,
     TRAINER_MODE_STORAGE_KEY,
     TRAINER_FEEDBACK_STORAGE_KEY,
+    TRAINER_NOTE_NAMES_STORAGE_KEY,
+    TRAINER_NOTE_NAMES_SOLFEGE_STORAGE_KEY,
+    TRAINER_ASSIGNED_STAVES_ONLY_STORAGE_KEY,
     TRAINER_FUTURE_PREVIEW_STORAGE_KEY,
     TRAINER_FUTURE_DEPTH_STORAGE_KEY,
     TRAINER_CORRECT_HIGHLIGHT_STORAGE_KEY,

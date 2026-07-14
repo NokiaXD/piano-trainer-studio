@@ -546,6 +546,39 @@ const GeometryEngine = {
         group.appendChild(circle);
     },
 
+    drawActiveNoteLabel(note) {
+        if (!AppState.noteNamesEnabled || !note) return;
+        const group = this.getFeedbackGroup();
+        if (!group) return;
+
+        let anchor = note.anchor;
+        const staffIdx = window.getVisibleStaffIndexForAssignmentId
+            ? window.getVisibleStaffIndexForAssignmentId(note.staffId)
+            : note.staffId - 1;
+        if (note.sourceNote && Number.isFinite(staffIdx)) {
+            anchor = this.getNoteAnchor(note.sourceNote, note.mIdx, staffIdx) || anchor;
+        }
+        if (!anchor) return;
+
+        const names = AppState.noteNamesSolfege
+            ? ['Do', 'Do#', 'Re', 'Re#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si']
+            : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', anchor.x);
+        text.setAttribute('y', anchor.y + (note.handRole === 'left' ? 19 : -12));
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'middle');
+        text.setAttribute('font-size', '14');
+        text.setAttribute('font-weight', '700');
+        text.setAttribute('font-family', 'Arial, sans-serif');
+        text.setAttribute('fill', '#111827');
+        text.setAttribute('stroke', '#ffffff');
+        text.setAttribute('stroke-width', '3');
+        text.setAttribute('paint-order', 'stroke');
+        text.textContent = `${names[((note.midi % 12) + 12) % 12]}${Math.floor(note.midi / 12) - 1}`;
+        group.appendChild(text);
+    },
+
 
     drawStoredFeedbackMarker(marker) {
         if (!marker?.anchor) return;
@@ -725,7 +758,8 @@ function resolveFeedbackAnchor(midi, targetStaffId, forceMIdx = null, anchorOrEx
                     const fallbackStaffId = (midi >= 60) ? AppState.hands.right : AppState.hands.left;
                     targetStaffId = fallbackStaffId ?? AppState.hands.right ?? 1;
                 }
-                const staffIdx = Math.max(0, (Number(targetStaffId) || 1) - 1);
+                const visibleStaffIdx = window.getVisibleStaffIndexForAssignmentId?.(targetStaffId);
+                const staffIdx = Number.isFinite(visibleStaffIdx) ? visibleStaffIdx : Math.max(0, (Number(targetStaffId) || 1) - 1);
 
                 const staffMeasure = osmd.GraphicSheet.MeasureList[mIdx][staffIdx] || osmd.GraphicSheet.MeasureList[mIdx][0];
                 const staffTopY = staffMeasure.PositionAndShape.AbsolutePosition.y * 10;
@@ -745,6 +779,7 @@ function resolveFeedbackAnchor(midi, targetStaffId, forceMIdx = null, anchorOrEx
 
 function renderFeedbackOverlay() {
     GeometryEngine.clearSvgFeedback();
+    AppState.activeNoteLabels.forEach(note => GeometryEngine.drawActiveNoteLabel(note));
     if (!AppState.feedbackEnabled) return;
 
     const currentContextKey = getCurrentFeedbackContext().key;
@@ -955,10 +990,12 @@ function getCombinedTieLength(note) {
 
 function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimestamp = null) {
     AppState.expectedNotes = [];
+    AppState.activeNoteLabels = [];
     AppState.visualNotesToStart = [];
     AppState.outOfRangeCurrentNotes = [];
 
     const mergedExpected = new Map();
+    const mergedActiveLabels = new Map();
     const mergedVisuals = new Map();
     const mergedOutOfRange = new Map();
 
@@ -968,6 +1005,31 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
         const isRH = handRole === 'right';
         const isLH = handRole === 'left';
         const isPracticingThisHand = (isRH && AppState.practice.right) || (isLH && AppState.practice.left);
+
+        if (AppState.noteNamesEnabled && handRole) {
+            e.Notes.forEach(n => {
+                const isInvisibleCue = n.Notehead === 'none' || n.PrintObject === false || n.isCueNote === true;
+                if (isInvisibleCue || n.isRest()) return;
+
+                const midi = n.halfTone + 12;
+                const staffIdx = window.getVisibleStaffIndexForAssignmentId
+                    ? window.getVisibleStaffIndexForAssignmentId(sid)
+                    : sid - 1;
+                if (!Number.isFinite(staffIdx)) return;
+
+                const anchor = GeometryEngine.getNoteAnchor(n, currentMeasureIdx, staffIdx);
+                if (anchor) {
+                    mergedActiveLabels.set(`${sid}|${midi}`, {
+                        midi,
+                        staffId: sid,
+                        handRole,
+                        anchor,
+                        sourceNote: n,
+                        mIdx: currentMeasureIdx
+                    });
+                }
+            });
+        }
 
         if (isPracticingThisHand) {
             e.Notes.forEach(n => {
@@ -1007,8 +1069,12 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
                             visualEndTimestamp = currentTimestamp + (combinedLength * 0.85);
                         }
 
-                        const staffIdx = sid - 1;
-                        const anchor = GeometryEngine.getNoteAnchor(n, currentMeasureIdx, staffIdx);
+                        const staffIdx = window.getVisibleStaffIndexForAssignmentId
+                            ? window.getVisibleStaffIndexForAssignmentId(sid)
+                            : sid - 1;
+                        const anchor = Number.isFinite(staffIdx)
+                            ? GeometryEngine.getNoteAnchor(n, currentMeasureIdx, staffIdx)
+                            : null;
 
                         const existingExpected = mergedExpected.get(key);
                         if (!existingExpected) {
@@ -1058,6 +1124,7 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
     });
 
     AppState.expectedNotes = Array.from(mergedExpected.values());
+    AppState.activeNoteLabels = Array.from(mergedActiveLabels.values());
     AppState.visualNotesToStart = Array.from(mergedVisuals.values());
     AppState.outOfRangeCurrentNotes = Array.from(mergedOutOfRange.values());
     AppState.realtimeWrongPressInCurrentContext = false;
