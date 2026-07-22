@@ -48,6 +48,7 @@ const AppState = {
     midiInBoost: 100,
     expectedNotes: [],
     activeNoteLabels: [],
+    scoreNoteLabels: [],
     pressedKeys: new Set(), 
     heldCorrectNotes: new Map(), 
     preExpectedHeldNotes: new Set(), 
@@ -59,6 +60,8 @@ const AppState = {
     feedbackEnabled: true,
     noteNamesEnabled: false,
     noteNamesSolfege: false,
+    scoreNoteNamesEnabled: false,
+    scoreNoteNamesDepth: 4,
     hideUnassignedStaves: false,
     anchorTime: 0,
     score: { correct: 0, wrong: 0 },
@@ -168,6 +171,8 @@ const TRAINER_MODE_STORAGE_KEY = 'pt_trainerMode';
 const TRAINER_FEEDBACK_STORAGE_KEY = 'pt_feedbackEnabled';
 const TRAINER_NOTE_NAMES_STORAGE_KEY = 'pt_noteNamesEnabled';
 const TRAINER_NOTE_NAMES_SOLFEGE_STORAGE_KEY = 'pt_noteNamesSolfege';
+const TRAINER_SCORE_NOTE_NAMES_STORAGE_KEY = 'pt_scoreNoteNamesEnabled';
+const TRAINER_SCORE_NOTE_NAMES_DEPTH_STORAGE_KEY = 'pt_scoreNoteNamesDepth';
 const TRAINER_ASSIGNED_STAVES_ONLY_STORAGE_KEY = 'pt_assignedStavesOnly';
 const TRAINER_FUTURE_PREVIEW_STORAGE_KEY = 'pt_futurePreviewEnabled';
 const TRAINER_FUTURE_DEPTH_STORAGE_KEY = 'pt_futurePreviewDepth';
@@ -282,6 +287,8 @@ const RESETTABLE_PREFERENCE_KEYS = [
     TRAINER_FEEDBACK_STORAGE_KEY,
     TRAINER_NOTE_NAMES_STORAGE_KEY,
     TRAINER_NOTE_NAMES_SOLFEGE_STORAGE_KEY,
+    TRAINER_SCORE_NOTE_NAMES_STORAGE_KEY,
+    TRAINER_SCORE_NOTE_NAMES_DEPTH_STORAGE_KEY,
     TRAINER_ASSIGNED_STAVES_ONLY_STORAGE_KEY,
     TRAINER_FUTURE_PREVIEW_STORAGE_KEY,
     TRAINER_FUTURE_DEPTH_STORAGE_KEY,

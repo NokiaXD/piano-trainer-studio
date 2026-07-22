@@ -546,16 +546,19 @@ const GeometryEngine = {
         group.appendChild(circle);
     },
 
-    drawActiveNoteLabel(note) {
-        if (!AppState.noteNamesEnabled || !note) return;
+    drawNoteNameLabel(note) {
+        if (!note) return;
         const group = this.getFeedbackGroup();
         if (!group) return;
 
+        const assignedHandRole = window.getAssignedHandRoleForStaff?.(note.staffId);
+        if (window.getAssignedHandRoleForStaff && !assignedHandRole) return;
         let anchor = note.anchor;
         const staffIdx = window.getVisibleStaffIndexForAssignmentId
             ? window.getVisibleStaffIndexForAssignmentId(note.staffId)
             : note.staffId - 1;
-        if (note.sourceNote && Number.isFinite(staffIdx)) {
+        if (note.sourceNote) {
+            if (!Number.isFinite(staffIdx)) return;
             anchor = this.getNoteAnchor(note.sourceNote, note.mIdx, staffIdx) || anchor;
         }
         if (!anchor) return;
@@ -577,6 +580,11 @@ const GeometryEngine = {
         text.setAttribute('paint-order', 'stroke');
         text.textContent = `${names[((note.midi % 12) + 12) % 12]}${Math.floor(note.midi / 12) - 1}`;
         group.appendChild(text);
+    },
+
+    drawActiveNoteLabel(note) {
+        if (!AppState.noteNamesEnabled) return;
+        this.drawNoteNameLabel(note);
     },
 
 
@@ -779,7 +787,11 @@ function resolveFeedbackAnchor(midi, targetStaffId, forceMIdx = null, anchorOrEx
 
 function renderFeedbackOverlay() {
     GeometryEngine.clearSvgFeedback();
-    AppState.activeNoteLabels.forEach(note => GeometryEngine.drawActiveNoteLabel(note));
+    if (AppState.scoreNoteNamesEnabled) {
+        AppState.scoreNoteLabels.forEach(note => GeometryEngine.drawNoteNameLabel(note));
+    } else {
+        AppState.activeNoteLabels.forEach(note => GeometryEngine.drawActiveNoteLabel(note));
+    }
     if (!AppState.feedbackEnabled) return;
 
     const currentContextKey = getCurrentFeedbackContext().key;
@@ -988,9 +1000,62 @@ function getCombinedTieLength(note) {
     return total || (note.Length?.RealValue ?? 0);
 }
 
+function buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx) {
+    if (!AppState.scoreNoteNamesEnabled || !osmd?.cursor?.Iterator || !Number.isFinite(currentMeasureIdx)) return [];
+
+    const cursor = osmd.cursor;
+    const savedMeasureIndex = cursor.Iterator.CurrentMeasureIndex;
+    const savedTimestamp = cursor.Iterator.currentTimeStamp?.RealValue ?? null;
+    const maxMeasureIndex = currentMeasureIdx + Math.max(1, Math.min(16, Number(AppState.scoreNoteNamesDepth) || 1)) - 1;
+    const labels = [];
+    let eventEntries = entries;
+    let safety = 0;
+
+    while (!cursor.Iterator.EndReached && safety < 100000) {
+        const measureIndex = cursor.Iterator.CurrentMeasureIndex;
+        if (measureIndex > maxMeasureIndex) break;
+
+        (eventEntries || []).forEach(entry => {
+            (entry?.Notes || []).forEach(note => {
+                if (!note || (note.isRest && note.isRest())) return;
+                if (note.Notehead === 'none' || note.PrintObject === false || note.isCueNote === true) return;
+                if (!Number.isFinite(Number(note.halfTone))) return;
+
+                const staffId = window.getResolvedStaffAssignmentIdFromNote?.(note) ?? Number(note.ParentStaff?.id);
+                const handRole = window.getAssignedHandRoleForStaff?.(staffId);
+                if (!handRole) return;
+
+                const staffIdx = window.getVisibleStaffIndexForAssignmentId?.(staffId);
+                if (!Number.isFinite(staffIdx)) return;
+
+                const anchor = GeometryEngine.getNoteAnchor(note, measureIndex, staffIdx);
+                if (!anchor) return;
+
+                labels.push({
+                    midi: Number(note.halfTone) + 12,
+                    staffId,
+                    handRole,
+                    anchor,
+                    sourceNote: note,
+                    mIdx: measureIndex
+                });
+            });
+        });
+
+        eventEntries = null;
+        cursor.Iterator.moveToNext();
+        eventEntries = cursor.Iterator.CurrentVoiceEntries;
+        safety += 1;
+    }
+
+    restoreCursorToMeasureAndTimestamp(savedMeasureIndex, savedTimestamp);
+    return labels;
+}
+
 function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimestamp = null) {
     AppState.expectedNotes = [];
     AppState.activeNoteLabels = [];
+    AppState.scoreNoteLabels = [];
     AppState.visualNotesToStart = [];
     AppState.outOfRangeCurrentNotes = [];
 
@@ -1125,6 +1190,7 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
 
     AppState.expectedNotes = Array.from(mergedExpected.values());
     AppState.activeNoteLabels = Array.from(mergedActiveLabels.values());
+    AppState.scoreNoteLabels = buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx);
     AppState.visualNotesToStart = Array.from(mergedVisuals.values());
     AppState.outOfRangeCurrentNotes = Array.from(mergedOutOfRange.values());
     AppState.realtimeWrongPressInCurrentContext = false;

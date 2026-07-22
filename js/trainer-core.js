@@ -103,11 +103,23 @@ function syncNoteNameSystemButton() {
     button.setAttribute('aria-pressed', String(AppState.noteNamesSolfege));
 }
 
+function syncScoreNoteNamesUi() {
+    const checkbox = document.getElementById('check-score-note-names');
+    const depthInput = document.getElementById('input-score-note-depth');
+    if (checkbox) checkbox.checked = AppState.scoreNoteNamesEnabled;
+    if (depthInput) {
+        depthInput.value = String(AppState.scoreNoteNamesDepth);
+        depthInput.disabled = !AppState.scoreNoteNamesEnabled;
+    }
+}
+
 function applyPersistedTrainerAndSettingsPreferences() {
     AppState.mode = localStorage.getItem(TRAINER_MODE_STORAGE_KEY) || 'realtime';
     AppState.feedbackEnabled = getStoredBool(TRAINER_FEEDBACK_STORAGE_KEY, true);
     AppState.noteNamesEnabled = getStoredBool(TRAINER_NOTE_NAMES_STORAGE_KEY, false);
     AppState.noteNamesSolfege = getStoredBool(TRAINER_NOTE_NAMES_SOLFEGE_STORAGE_KEY, false);
+    AppState.scoreNoteNamesEnabled = getStoredBool(TRAINER_SCORE_NOTE_NAMES_STORAGE_KEY, false);
+    AppState.scoreNoteNamesDepth = getClampedNumber(TRAINER_SCORE_NOTE_NAMES_DEPTH_STORAGE_KEY, 1, 16, 4);
     AppState.hideUnassignedStaves = getStoredBool(TRAINER_ASSIGNED_STAVES_ONLY_STORAGE_KEY, false);
     AppState.futurePreviewEnabled = getStoredBool(TRAINER_FUTURE_PREVIEW_STORAGE_KEY, true);
     AppState.futurePreviewDepth = 1;
@@ -149,6 +161,7 @@ function applyPersistedTrainerAndSettingsPreferences() {
     const noteNamesCheckbox = document.getElementById('check-note-names');
     if (noteNamesCheckbox) noteNamesCheckbox.checked = AppState.noteNamesEnabled;
     syncNoteNameSystemButton();
+    syncScoreNoteNamesUi();
 
     const assignedStavesOnlyCheckbox = document.getElementById('check-assigned-staves-only');
     if (assignedStavesOnlyCheckbox) assignedStavesOnlyCheckbox.checked = AppState.hideUnassignedStaves;
@@ -261,10 +274,13 @@ function restoreDefaultPreferences({ reloadDevices = true } = {}) {
 
     AppState.noteNamesEnabled = false;
     AppState.noteNamesSolfege = false;
+    AppState.scoreNoteNamesEnabled = false;
+    AppState.scoreNoteNamesDepth = 4;
     AppState.hideUnassignedStaves = false;
     const noteNamesCheckbox = document.getElementById('check-note-names');
     if (noteNamesCheckbox) noteNamesCheckbox.checked = false;
     syncNoteNameSystemButton();
+    syncScoreNoteNamesUi();
     const assignedStavesOnlyCheckbox = document.getElementById('check-assigned-staves-only');
     if (assignedStavesOnlyCheckbox) assignedStavesOnlyCheckbox.checked = false;
 
@@ -1452,6 +1468,19 @@ window.getResolvedStaffAssignmentIdFromEntry = getResolvedStaffAssignmentIdFromE
 window.getAssignedHandRoleForStaff = getAssignedHandRoleForStaff;
 window.getVisibleStaffIndexForAssignmentId = getVisibleStaffIndexForAssignmentId;
 
+function refreshScoreNoteLabelsFromCursor() {
+    const iterator = osmd?.cursor?.Iterator;
+    if (!iterator) {
+        AppState.scoreNoteLabels = [];
+        return;
+    }
+
+    AppState.scoreNoteLabels = buildScoreNoteLabelsFromEntries(
+        iterator.CurrentVoiceEntries || [],
+        iterator.CurrentMeasureIndex
+    );
+}
+
 function syncHandAssignmentFromControls({ refreshCurrentFrame = false } = {}) {
     const lhAssign = document.getElementById('assign-lh');
     const rhAssign = document.getElementById('assign-rh');
@@ -1483,6 +1512,7 @@ function syncHandAssignmentFromControls({ refreshCurrentFrame = false } = {}) {
     } else {
         AppState.expectedNotes = [];
         AppState.activeNoteLabels = [];
+        AppState.scoreNoteLabels = [];
         AppState.visualNotesToStart = [];
         AppState.outOfRangeCurrentNotes = [];
         renderFeedbackOverlay();
@@ -1546,7 +1576,7 @@ function initSongUI() {
     lhAssign.value = formatStaffAssignmentValue(defaults.left);
     rhAssign.value = formatStaffAssignmentValue(defaults.right);
     bindHandAssignmentControls();
-    syncHandAssignmentFromControls();
+    syncHandAssignmentFromControls({ refreshCurrentFrame: true });
     
     AppState.score.correct = 0;
     AppState.score.wrong = 0;
@@ -2387,7 +2417,8 @@ function clearVisuals() {
     AppState.followAdvanceInfo = null;
     AppState.currentExpectedContext = null;
     AppState.earlyGraceReservations.clear();
-    wipeHardwareLEDs(); 
+    wipeHardwareLEDs();
+    renderFeedbackOverlay();
     renderVirtualKeyboard();
 }
 
@@ -3026,6 +3057,27 @@ if (noteNamesCheckbox) {
     });
 }
 
+const scoreNoteNamesCheckbox = document.getElementById('check-score-note-names');
+if (scoreNoteNamesCheckbox) {
+    scoreNoteNamesCheckbox.addEventListener('change', (e) => {
+        AppState.scoreNoteNamesEnabled = e.target.checked;
+        setStoredBool(TRAINER_SCORE_NOTE_NAMES_STORAGE_KEY, AppState.scoreNoteNamesEnabled);
+        syncScoreNoteNamesUi();
+        syncHandAssignmentFromControls({ refreshCurrentFrame: true });
+    });
+}
+
+const scoreNoteNamesDepthInput = document.getElementById('input-score-note-depth');
+if (scoreNoteNamesDepthInput) {
+    scoreNoteNamesDepthInput.addEventListener('change', (e) => {
+        const value = Number(e.target.value);
+        AppState.scoreNoteNamesDepth = Math.max(1, Math.min(16, Number.isFinite(value) ? Math.round(value) : 4));
+        localStorage.setItem(TRAINER_SCORE_NOTE_NAMES_DEPTH_STORAGE_KEY, String(AppState.scoreNoteNamesDepth));
+        syncScoreNoteNamesUi();
+        if (AppState.scoreNoteNamesEnabled) syncHandAssignmentFromControls({ refreshCurrentFrame: true });
+    });
+}
+
 const noteNameSystemButton = document.getElementById('btn-note-name-system');
 if (noteNameSystemButton) {
     noteNameSystemButton.addEventListener('click', () => {
@@ -3352,9 +3404,9 @@ function clearTransientPlaybackState({ clearVisualState = false } = {}) {
 
     if (clearVisualState) {
         clearVisuals();
-    } else {
-        renderFeedbackOverlay();
     }
+    refreshScoreNoteLabelsFromCursor();
+    renderFeedbackOverlay();
 }
 
 function stopPlaybackState({ pauseTransport = true } = {}) {
@@ -3393,6 +3445,7 @@ function resetPlaybackForLoadedScore() {
     stopPlaybackState({ pauseTransport: false });
 
     GeometryEngine.clearSvgFeedback();
+    AppState.scoreNoteLabels = [];
     AppState.pendingAudio = [];
     AppState.score.correct = 0;
     AppState.score.wrong = 0;
@@ -3433,6 +3486,7 @@ document.getElementById('btn-reset').onclick = () => {
         }
     }
     osmd.cursor.update();
+    syncHandAssignmentFromControls({ refreshCurrentFrame: true });
     handleAutoScroll();
     AppState.ledPreviewTraversalIndex = -1;
     AppState.lastLedPreviewEvents = [];
@@ -4017,6 +4071,8 @@ function playbackLoop() {
     if (!entries || entries.length === 0) {
         osmd.cursor.Iterator.moveToNext();
         osmd.cursor.update();
+        refreshScoreNoteLabelsFromCursor();
+        renderFeedbackOverlay();
         requestAnimationFrame(playbackLoop);
         return;
     }
