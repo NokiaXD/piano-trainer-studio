@@ -692,7 +692,7 @@ function drawNoteLabelsWithChordStaggering(labels) {
     const chordGroups = new Map();
     labels.forEach(note => {
         if (!note?.anchor) return;
-        const key = `${note.mIdx}|${note.handRole}|${Math.round(note.anchor.x / 4)}`;
+        const key = `${note.mIdx}|${note.handRole}|${Math.round(note.anchor.x / 6)}`;
         if (!chordGroups.has(key)) chordGroups.set(key, []);
         chordGroups.get(key).push(note);
     });
@@ -705,12 +705,19 @@ function drawNoteLabelsWithChordStaggering(labels) {
 
         groupNotes.sort((a, b) => a.anchor.y - b.anchor.y);
 
+        if (groupNotes.length === 2) {
+            GeometryEngine.drawNoteNameLabel(groupNotes[0], { offsetY: -12 });
+            GeometryEngine.drawNoteNameLabel(groupNotes[1], { offsetY: 16 });
+            return;
+        }
+
+        const total = groupNotes.length;
         groupNotes.forEach((note, idx) => {
             let offsetY;
-            if (note.handRole === 'left') {
-                offsetY = idx === groupNotes.length - 1 ? 18 : (-12 - ((groupNotes.length - 2 - idx) * 14));
+            if (idx === total - 1) {
+                offsetY = 16;
             } else {
-                offsetY = idx === 0 ? -12 : (16 + ((idx - 1) * 14));
+                offsetY = -12 - ((total - 2 - idx) * 14);
             }
             GeometryEngine.drawNoteNameLabel(note, { offsetY });
         });
@@ -876,27 +883,26 @@ function renderFeedbackOverlay() {
     GeometryEngine.clearSvgFeedback();
     if (AppState.scoreNoteNamesEnabled) {
         const labelsToRender = [];
-        const seenKeys = new Set();
+        const seenNotes = new Set();
+        const seenPositions = new Set();
 
         if (AppState.noteNamesEnabled && Array.isArray(AppState.activeNoteLabels)) {
             AppState.activeNoteLabels.forEach(note => {
-                const key = `${note.staffId}|${note.midi}|${note.mIdx}`;
-                seenKeys.add(key);
+                if (note.sourceNote) seenNotes.add(note.sourceNote);
+                if (note.anchor) seenPositions.add(`${note.staffId}|${note.midi}|${note.mIdx}|${Math.round(note.anchor.x)}|${Math.round(note.anchor.y)}`);
                 labelsToRender.push(note);
             });
         }
 
         if (Array.isArray(AppState.scoreNoteLabels)) {
             AppState.scoreNoteLabels.forEach(note => {
-                const key = `${note.staffId}|${note.midi}|${note.mIdx}`;
-                if (note.isCurrentNote) {
-                    if (!AppState.noteNamesEnabled) return;
-                    if (seenKeys.has(key)) return;
-                }
-                if (!seenKeys.has(key)) {
-                    seenKeys.add(key);
-                    labelsToRender.push(note);
-                }
+                if (note.sourceNote && seenNotes.has(note.sourceNote)) return;
+                const posKey = note.anchor ? `${note.staffId}|${note.midi}|${note.mIdx}|${Math.round(note.anchor.x)}|${Math.round(note.anchor.y)}` : null;
+                if (posKey && seenPositions.has(posKey)) return;
+
+                if (note.sourceNote) seenNotes.add(note.sourceNote);
+                if (posKey) seenPositions.add(posKey);
+                labelsToRender.push(note);
             });
         }
 

@@ -1520,7 +1520,7 @@ function syncHandAssignmentFromControls({ refreshCurrentFrame = false } = {}) {
     } else {
         AppState.expectedNotes = [];
         AppState.activeNoteLabels = [];
-        AppState.scoreNoteLabels = [];
+        refreshScoreNoteLabelsFromCursor();
         AppState.visualNotesToStart = [];
         AppState.outOfRangeCurrentNotes = [];
         renderFeedbackOverlay();
@@ -3079,13 +3079,19 @@ if (scoreNoteNamesCheckbox) {
 const scoreNoteNamesDepthInput = document.getElementById('input-score-note-depth');
 if (scoreNoteNamesDepthInput) {
     const handleDepthChange = (e) => {
-        const value = Number(e.target.value);
-        AppState.scoreNoteNamesDepth = Math.max(1, Math.min(16, Number.isFinite(value) ? Math.round(value) : 4));
+        const raw = e.target.value;
+        if (e.type === 'input' && raw.trim() === '') return;
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return;
+        AppState.scoreNoteNamesDepth = Math.max(1, Math.min(16, Math.round(value)));
         localStorage.setItem(TRAINER_SCORE_NOTE_NAMES_DEPTH_STORAGE_KEY, String(AppState.scoreNoteNamesDepth));
-        syncScoreNoteNamesUi();
+        if (e.type !== 'input') {
+            syncScoreNoteNamesUi();
+        }
         if (AppState.scoreNoteNamesEnabled) syncHandAssignmentFromControls({ refreshCurrentFrame: true });
     };
     scoreNoteNamesDepthInput.addEventListener('change', handleDepthChange);
+    scoreNoteNamesDepthInput.addEventListener('blur', handleDepthChange);
     scoreNoteNamesDepthInput.addEventListener('input', handleDepthChange);
 }
 
