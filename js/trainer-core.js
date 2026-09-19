@@ -1413,6 +1413,11 @@ function applyAssignedStaffVisibility() {
     const selectedStaffIds = new Set([AppState.hands.left, AppState.hands.right]
         .map(Number)
         .filter(Number.isFinite));
+
+    if (AppState.hideUnassignedStaves && selectedStaffIds.size === 0) {
+        return false;
+    }
+
     let changed = false;
 
     instruments.forEach(instrument => {
@@ -1430,6 +1435,7 @@ function applyAssignedStaffVisibility() {
 
     if (changed && typeof osmd.updateGraphic === 'function') {
         AppState.activeNoteLabels = [];
+        AppState.scoreNoteLabels = [];
         osmd.updateGraphic();
         renderScoreAndRefreshGeometry();
         osmd.cursor?.update();
@@ -1467,6 +1473,7 @@ window.getResolvedStaffAssignmentIdFromNote = getResolvedStaffAssignmentIdFromNo
 window.getResolvedStaffAssignmentIdFromEntry = getResolvedStaffAssignmentIdFromEntry;
 window.getAssignedHandRoleForStaff = getAssignedHandRoleForStaff;
 window.getVisibleStaffIndexForAssignmentId = getVisibleStaffIndexForAssignmentId;
+window.getMeasureTimingInfo = getMeasureTimingInfo;
 
 function refreshScoreNoteLabelsFromCursor() {
     const iterator = osmd?.cursor?.Iterator;
@@ -1477,7 +1484,8 @@ function refreshScoreNoteLabelsFromCursor() {
 
     AppState.scoreNoteLabels = buildScoreNoteLabelsFromEntries(
         iterator.CurrentVoiceEntries || [],
-        iterator.CurrentMeasureIndex
+        iterator.CurrentMeasureIndex,
+        iterator.currentTimeStamp?.RealValue ?? null
     );
 }
 
@@ -2405,6 +2413,7 @@ function clearVisuals() {
     AppState.visualNotesToStart = [];
     AppState.expectedNotes = [];
     AppState.activeNoteLabels = [];
+    AppState.scoreNoteLabels = [];
     AppState.outOfRangeCurrentNotes = [];
     AppState.activeHeldIncorrectFeedback.clear();
     AppState.releasedIncorrectFeedback = [];
@@ -3069,13 +3078,15 @@ if (scoreNoteNamesCheckbox) {
 
 const scoreNoteNamesDepthInput = document.getElementById('input-score-note-depth');
 if (scoreNoteNamesDepthInput) {
-    scoreNoteNamesDepthInput.addEventListener('change', (e) => {
+    const handleDepthChange = (e) => {
         const value = Number(e.target.value);
         AppState.scoreNoteNamesDepth = Math.max(1, Math.min(16, Number.isFinite(value) ? Math.round(value) : 4));
         localStorage.setItem(TRAINER_SCORE_NOTE_NAMES_DEPTH_STORAGE_KEY, String(AppState.scoreNoteNamesDepth));
         syncScoreNoteNamesUi();
         if (AppState.scoreNoteNamesEnabled) syncHandAssignmentFromControls({ refreshCurrentFrame: true });
-    });
+    };
+    scoreNoteNamesDepthInput.addEventListener('change', handleDepthChange);
+    scoreNoteNamesDepthInput.addEventListener('input', handleDepthChange);
 }
 
 const noteNameSystemButton = document.getElementById('btn-note-name-system');
@@ -3476,6 +3487,7 @@ document.getElementById('btn-reset').onclick = () => {
     AppState.score.correct = 0;
     AppState.score.wrong = 0;
     updateScoreDisplay();
+    clearVisuals();
 
     osmd.cursor.reset(); 
     const isLoopEnabled = document.getElementById('check-looper').checked;
@@ -3490,7 +3502,6 @@ document.getElementById('btn-reset').onclick = () => {
     handleAutoScroll();
     AppState.ledPreviewTraversalIndex = -1;
     AppState.lastLedPreviewEvents = [];
-    clearVisuals();
     if (AppState.ledOutputMode === 'wled') {
         WLEDController.forceClear().catch(() => {});
     }

@@ -546,7 +546,7 @@ const GeometryEngine = {
         group.appendChild(circle);
     },
 
-    drawNoteNameLabel(note) {
+    drawNoteNameLabel(note, options = {}) {
         if (!note) return;
         const group = this.getFeedbackGroup();
         if (!group) return;
@@ -554,31 +554,45 @@ const GeometryEngine = {
         const assignedHandRole = window.getAssignedHandRoleForStaff?.(note.staffId);
         if (window.getAssignedHandRoleForStaff && !assignedHandRole) return;
         let anchor = note.anchor;
-        const staffIdx = window.getVisibleStaffIndexForAssignmentId
-            ? window.getVisibleStaffIndexForAssignmentId(note.staffId)
-            : note.staffId - 1;
-        if (note.sourceNote) {
-            if (!Number.isFinite(staffIdx)) return;
-            anchor = this.getNoteAnchor(note.sourceNote, note.mIdx, staffIdx) || anchor;
+        if (!anchor && note.sourceNote) {
+            const staffIdx = window.getVisibleStaffIndexForAssignmentId
+                ? window.getVisibleStaffIndexForAssignmentId(note.staffId)
+                : note.staffId - 1;
+            if (Number.isFinite(staffIdx)) {
+                anchor = this.getNoteAnchor(note.sourceNote, note.mIdx, staffIdx);
+            }
         }
         if (!anchor) return;
 
-        const names = AppState.noteNamesSolfege
-            ? ['Do', 'Do#', 'Re', 'Re#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si']
-            : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const isCurrent = !!note.isCurrentNote;
+        const defaultOffsetY = note.handRole === 'left' ? 18 : -12;
+        const offsetY = Number.isFinite(options.offsetY) ? options.offsetY : defaultOffsetY;
+
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.setAttribute('x', anchor.x);
-        text.setAttribute('y', anchor.y + (note.handRole === 'left' ? 19 : -12));
+        text.setAttribute('y', anchor.y + offsetY);
         text.setAttribute('text-anchor', 'middle');
         text.setAttribute('dominant-baseline', 'middle');
-        text.setAttribute('font-size', '14');
-        text.setAttribute('font-weight', '700');
         text.setAttribute('font-family', 'Arial, sans-serif');
-        text.setAttribute('fill', '#111827');
-        text.setAttribute('stroke', '#ffffff');
-        text.setAttribute('stroke-width', '3');
         text.setAttribute('paint-order', 'stroke');
-        text.textContent = `${names[((note.midi % 12) + 12) % 12]}${Math.floor(note.midi / 12) - 1}`;
+
+        if (isCurrent) {
+            const handColor = note.handRole === 'left' ? '#059669' : '#2563eb';
+            text.setAttribute('font-size', '13.5');
+            text.setAttribute('font-weight', '800');
+            text.setAttribute('fill', '#ffffff');
+            text.setAttribute('stroke', handColor);
+            text.setAttribute('stroke-width', '4');
+        } else {
+            text.setAttribute('font-size', '11');
+            text.setAttribute('font-weight', '700');
+            text.setAttribute('fill', '#1e293b');
+            text.setAttribute('stroke', '#ffffff');
+            text.setAttribute('stroke-width', '2.5');
+            text.setAttribute('opacity', '0.9');
+        }
+
+        text.textContent = formatNoteLabelText(note);
         group.appendChild(text);
     },
 
@@ -629,6 +643,79 @@ const GeometryEngine = {
         }
     }
 };
+
+function formatNoteLabelText(note) {
+    const midi = note.midi;
+    const isSolfege = !!AppState.noteNamesSolfege;
+    const octave = Number.isFinite(midi) ? Math.floor(midi / 12) - 1 : '';
+    const src = note.sourceNote;
+    const pitch = src?.Pitch || src?.pitch;
+
+    if (pitch && pitch.FundamentalNote !== undefined) {
+        const fundamental = Number(pitch.FundamentalNote);
+        const noteMapStd = { 0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B' };
+        const noteMapSol = { 0: 'Do', 2: 'Re', 4: 'Mi', 5: 'Fa', 7: 'Sol', 9: 'La', 11: 'Si' };
+        const stepName = (isSolfege ? noteMapSol : noteMapStd)[fundamental] || (isSolfege ? 'Do' : 'C');
+
+        let accidentalStr = '';
+        const alter = Number(pitch.AccidentalHalfTones ?? pitch.accidentalHalfTones ?? 0);
+        if (alter === 1) accidentalStr = '♯';
+        else if (alter === -1) accidentalStr = '♭';
+        else if (alter === 2) accidentalStr = '𝄪';
+        else if (alter === -2) accidentalStr = '𝄫';
+
+        return `${stepName}${accidentalStr}${octave}`;
+    }
+
+    const semitone = ((midi % 12) + 12) % 12;
+    let keyBias = 'sharp';
+    try {
+        const sf = osmd?.Sheet?.KeyInstruction?.Key ?? osmd?.Sheet?.SourceMeasures?.[0]?.ActiveKey?.Key;
+        if (typeof sf === 'number' && sf < 0) keyBias = 'flat';
+    } catch (e) {}
+
+    const namesSharpStd = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+    const namesFlatStd  = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+    const namesSharpSol = ['Do', 'Do♯', 'Re', 'Re♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
+    const namesFlatSol  = ['Do', 'Re♭', 'Re', 'Mi♭', 'Mi', 'Fa', 'Sol♭', 'Sol', 'La♭', 'La', 'Si♭', 'Si'];
+
+    const pool = isSolfege
+        ? (keyBias === 'flat' ? namesFlatSol : namesSharpSol)
+        : (keyBias === 'flat' ? namesFlatStd : namesSharpStd);
+
+    return `${pool[semitone]}${octave}`;
+}
+
+function drawNoteLabelsWithChordStaggering(labels) {
+    if (!labels || labels.length === 0) return;
+
+    const chordGroups = new Map();
+    labels.forEach(note => {
+        if (!note?.anchor) return;
+        const key = `${note.mIdx}|${note.handRole}|${Math.round(note.anchor.x / 4)}`;
+        if (!chordGroups.has(key)) chordGroups.set(key, []);
+        chordGroups.get(key).push(note);
+    });
+
+    chordGroups.forEach(groupNotes => {
+        if (groupNotes.length === 1) {
+            GeometryEngine.drawNoteNameLabel(groupNotes[0]);
+            return;
+        }
+
+        groupNotes.sort((a, b) => a.anchor.y - b.anchor.y);
+
+        groupNotes.forEach((note, idx) => {
+            let offsetY;
+            if (note.handRole === 'left') {
+                offsetY = idx === groupNotes.length - 1 ? 18 : (-12 - ((groupNotes.length - 2 - idx) * 14));
+            } else {
+                offsetY = idx === 0 ? -12 : (16 + ((idx - 1) * 14));
+            }
+            GeometryEngine.drawNoteNameLabel(note, { offsetY });
+        });
+    });
+}
 
 function renderLooper() {
     GeometryEngine.renderLooper();
@@ -788,9 +875,34 @@ function resolveFeedbackAnchor(midi, targetStaffId, forceMIdx = null, anchorOrEx
 function renderFeedbackOverlay() {
     GeometryEngine.clearSvgFeedback();
     if (AppState.scoreNoteNamesEnabled) {
-        AppState.scoreNoteLabels.forEach(note => GeometryEngine.drawNoteNameLabel(note));
-    } else {
-        AppState.activeNoteLabels.forEach(note => GeometryEngine.drawActiveNoteLabel(note));
+        const labelsToRender = [];
+        const seenKeys = new Set();
+
+        if (AppState.noteNamesEnabled && Array.isArray(AppState.activeNoteLabels)) {
+            AppState.activeNoteLabels.forEach(note => {
+                const key = `${note.staffId}|${note.midi}|${note.mIdx}`;
+                seenKeys.add(key);
+                labelsToRender.push(note);
+            });
+        }
+
+        if (Array.isArray(AppState.scoreNoteLabels)) {
+            AppState.scoreNoteLabels.forEach(note => {
+                const key = `${note.staffId}|${note.midi}|${note.mIdx}`;
+                if (note.isCurrentNote) {
+                    if (!AppState.noteNamesEnabled) return;
+                    if (seenKeys.has(key)) return;
+                }
+                if (!seenKeys.has(key)) {
+                    seenKeys.add(key);
+                    labelsToRender.push(note);
+                }
+            });
+        }
+
+        drawNoteLabelsWithChordStaggering(labelsToRender);
+    } else if (AppState.noteNamesEnabled) {
+        drawNoteLabelsWithChordStaggering(AppState.activeNoteLabels);
     }
     if (!AppState.feedbackEnabled) return;
 
@@ -1000,55 +1112,87 @@ function getCombinedTieLength(note) {
     return total || (note.Length?.RealValue ?? 0);
 }
 
-function buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx) {
-    if (!AppState.scoreNoteNamesEnabled || !osmd?.cursor?.Iterator || !Number.isFinite(currentMeasureIdx)) return [];
+function buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx, currentTimestamp = null) {
+    if (!AppState.scoreNoteNamesEnabled || !osmd?.GraphicSheet?.MeasureList || !Number.isFinite(currentMeasureIdx)) return [];
 
-    const cursor = osmd.cursor;
-    const savedMeasureIndex = cursor.Iterator.CurrentMeasureIndex;
-    const savedTimestamp = cursor.Iterator.currentTimeStamp?.RealValue ?? null;
-    const maxMeasureIndex = currentMeasureIdx + Math.max(1, Math.min(16, Number(AppState.scoreNoteNamesDepth) || 1)) - 1;
+    const totalMeasures = osmd.GraphicSheet.MeasureList.length;
+    const depth = Math.max(1, Math.min(16, Number(AppState.scoreNoteNamesDepth) || 1));
+    const maxMeasureIdx = Math.min(totalMeasures - 1, currentMeasureIdx + depth - 1);
     const labels = [];
-    let eventEntries = entries;
-    let safety = 0;
+    const seenNotes = new Set();
 
-    while (!cursor.Iterator.EndReached && safety < 100000) {
-        const measureIndex = cursor.Iterator.CurrentMeasureIndex;
-        if (measureIndex > maxMeasureIndex) break;
+    for (let mIdx = currentMeasureIdx; mIdx <= maxMeasureIdx; mIdx++) {
+        const staffList = osmd.GraphicSheet.MeasureList[mIdx];
+        if (!staffList) continue;
 
-        (eventEntries || []).forEach(entry => {
-            (entry?.Notes || []).forEach(note => {
-                if (!note || (note.isRest && note.isRest())) return;
-                if (note.Notehead === 'none' || note.PrintObject === false || note.isCueNote === true) return;
-                if (!Number.isFinite(Number(note.halfTone))) return;
+        for (let staffIdx = 0; staffIdx < staffList.length; staffIdx++) {
+            const measure = staffList[staffIdx];
+            if (!measure?.staffEntries) continue;
 
-                const staffId = window.getResolvedStaffAssignmentIdFromNote?.(note) ?? Number(note.ParentStaff?.id);
-                const handRole = window.getAssignedHandRoleForStaff?.(staffId);
-                if (!handRole) return;
+            for (let i = 0; i < measure.staffEntries.length; i++) {
+                const se = measure.staffEntries[i];
+                if (!se?.graphicalVoiceEntries) continue;
 
-                const staffIdx = window.getVisibleStaffIndexForAssignmentId?.(staffId);
-                if (!Number.isFinite(staffIdx)) return;
+                for (let j = 0; j < se.graphicalVoiceEntries.length; j++) {
+                    const gve = se.graphicalVoiceEntries[j];
+                    if (!gve?.notes) continue;
 
-                const anchor = GeometryEngine.getNoteAnchor(note, measureIndex, staffIdx);
-                if (!anchor) return;
+                    for (let k = 0; k < gve.notes.length; k++) {
+                        const gn = gve.notes[k];
+                        const note = gn?.sourceNote;
+                        if (!note || seenNotes.has(note)) continue;
+                        if (note.isRest && note.isRest()) continue;
+                        if (note.Notehead === 'none' || note.PrintObject === false || note.isCueNote === true) continue;
+                        if (!Number.isFinite(Number(note.halfTone))) continue;
 
-                labels.push({
-                    midi: Number(note.halfTone) + 12,
-                    staffId,
-                    handRole,
-                    anchor,
-                    sourceNote: note,
-                    mIdx: measureIndex
-                });
-            });
-        });
+                        const staffId = window.getResolvedStaffAssignmentIdFromNote?.(note) ?? Number(note.ParentStaff?.id);
+                        const handRole = window.getAssignedHandRoleForStaff?.(staffId);
+                        if (!handRole) continue;
 
-        eventEntries = null;
-        cursor.Iterator.moveToNext();
-        eventEntries = cursor.Iterator.CurrentVoiceEntries;
-        safety += 1;
+                        const timing = window.getMeasureTimingInfo ? window.getMeasureTimingInfo(mIdx) : null;
+                        const measureStart = Number.isFinite(timing?.startTimestamp) ? timing.startTimestamp : 0;
+                        const noteRelTimestamp = note.ParentVoiceEntry?.Timestamp?.RealValue;
+                        const noteAbsTimestamp = Number.isFinite(noteRelTimestamp) ? (measureStart + noteRelTimestamp) : null;
+
+                        if (mIdx === currentMeasureIdx && Number.isFinite(currentTimestamp)) {
+                            const compTimestamp = currentTimestamp >= measureStart
+                                ? noteAbsTimestamp
+                                : noteRelTimestamp;
+                            if (Number.isFinite(compTimestamp) && compTimestamp < currentTimestamp - 0.0001) {
+                                continue;
+                            }
+                        }
+
+                        seenNotes.add(note);
+                        const anchor = GeometryEngine.getNoteAnchor(note, mIdx, staffIdx);
+                        if (!anchor) continue;
+
+                        let isCurrentNote = false;
+                        if (mIdx === currentMeasureIdx && Number.isFinite(currentTimestamp)) {
+                            const compTimestamp = currentTimestamp >= measureStart
+                                ? noteAbsTimestamp
+                                : noteRelTimestamp;
+                            if (Number.isFinite(compTimestamp)) {
+                                isCurrentNote = Math.abs(compTimestamp - currentTimestamp) < 0.001;
+                            }
+                        }
+
+                        labels.push({
+                            midi: Number(note.halfTone) + 12,
+                            staffId,
+                            handRole,
+                            anchor,
+                            sourceNote: note,
+                            mIdx,
+                            isCurrentNote,
+                            timestamp: noteAbsTimestamp ?? noteRelTimestamp
+                        });
+                    }
+                }
+            }
+        }
     }
 
-    restoreCursorToMeasureAndTimestamp(savedMeasureIndex, savedTimestamp);
     return labels;
 }
 
@@ -1090,7 +1234,8 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
                         handRole,
                         anchor,
                         sourceNote: n,
-                        mIdx: currentMeasureIdx
+                        mIdx: currentMeasureIdx,
+                        isCurrentNote: true
                     });
                 }
             });
@@ -1190,7 +1335,7 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
 
     AppState.expectedNotes = Array.from(mergedExpected.values());
     AppState.activeNoteLabels = Array.from(mergedActiveLabels.values());
-    AppState.scoreNoteLabels = buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx);
+    AppState.scoreNoteLabels = buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx, currentTimestamp);
     AppState.visualNotesToStart = Array.from(mergedVisuals.values());
     AppState.outOfRangeCurrentNotes = Array.from(mergedOutOfRange.values());
     AppState.realtimeWrongPressInCurrentContext = false;

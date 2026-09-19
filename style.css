@@ -3200,6 +3200,35 @@ body.app-fullscreen-active .score-overlay-controls {
     margin: 0;
 }
 
+.practice-feedback-list .note-name-depth-control {
+    padding-left: 24px;
+    font-size: 0.88rem;
+    color: #cbd5e1;
+}
+
+.practice-feedback-list .note-name-depth-control input.num-input {
+    width: 48px;
+    text-align: center;
+}
+
+.note-name-system-btn {
+    appearance: none;
+    background: #1e293b;
+    color: #f1f5f9;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.note-name-system-btn:hover {
+    background: #334155;
+    border-color: #475569;
+}
+
 #fs-practice-popup .practice-divider {
     margin: 6px 0 8px;
 }
