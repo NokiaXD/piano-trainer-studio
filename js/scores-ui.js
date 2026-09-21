@@ -611,7 +611,7 @@ function createScoresLibraryToolbar({ filteredScores = [], folders = [], activeF
 
 function showScoreRowActionMenu(score) {
     return buildActionMenu({
-        titleText: String(score?.title || getScoreDisplayTitle(score?.fileName || '') || 'Untitled Score').trim() || 'Untitled Score',
+        titleText: String(score?.title || window.PTHelpers.getScoreDisplayTitle(score?.fileName || '') || 'Untitled Score').trim() || 'Untitled Score',
         items: [
             { value: 'rename', label: 'Rename' },
             { value: 'move', label: 'Move' },
@@ -622,7 +622,7 @@ function showScoreRowActionMenu(score) {
 
 
 function createScoreRow(score, { compact = false, manageMode = false } = {}) {
-    const resolvedTitle = String(score.title || getScoreDisplayTitle(score.fileName || '') || 'Untitled Score').trim() || 'Untitled Score';
+    const resolvedTitle = String(score.title || window.PTHelpers.getScoreDisplayTitle(score.fileName || '') || 'Untitled Score').trim() || 'Untitled Score';
     const resolvedFileName = String(score.fileName || '').trim();
     const showFileNameMeta = shouldShowScoreFileName(resolvedTitle, resolvedFileName);
     const metaText = showFileNameMeta ? resolvedFileName : '';
@@ -989,7 +989,7 @@ async function saveCurrentScoreToLibrary() {
         return;
     }
 
-    const defaultTitle = AppState.currentScoreTitle || getScoreDisplayTitle(AppState.currentScoreFileName || 'Untitled Score');
+    const defaultTitle = AppState.currentScoreTitle || window.PTHelpers.getScoreDisplayTitle(AppState.currentScoreFileName || 'Untitled Score');
     const title = window.prompt('Save to library as:', defaultTitle);
     if (title == null) return;
 
@@ -1005,7 +1005,7 @@ async function saveCurrentScoreToLibrary() {
             title,
             folderId: selectedFolderId,
             fileName: AppState.currentScoreFileName || `${title}.xml`,
-            fileType: AppState.currentScoreFileType || getScoreFileTypeFromName(AppState.currentScoreFileName || ''),
+            fileType: AppState.currentScoreFileType || window.PTHelpers.getScoreFileTypeFromName(AppState.currentScoreFileName || ''),
             rawData: AppState.currentScoreData,
             lastOpenedAt: Date.now()
         });

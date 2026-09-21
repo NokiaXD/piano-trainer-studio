@@ -120,7 +120,7 @@ function setLedCalibrationOffsetForMidi(midi, offset) {
     saveLedCalibration();
     updateLedKeyMapping();
     WLEDController.clearLastSignature();
-    renderVirtualKeyboard();
+    window.PTVirtualKeyboard.renderVirtualKeyboard();
     syncLedCalibrationControls();
 }
 
@@ -129,7 +129,7 @@ function resetAllLedCalibration() {
     saveLedCalibration();
     updateLedKeyMapping();
     WLEDController.clearLastSignature();
-    renderVirtualKeyboard();
+    window.PTVirtualKeyboard.renderVirtualKeyboard();
     syncLedCalibrationControls();
 }
 
@@ -208,7 +208,7 @@ function setLedCalibrationMode(enabled) {
 
     syncLedCalibrationControls();
     WLEDController.clearLastSignature();
-    renderVirtualKeyboard();
+    window.PTVirtualKeyboard.renderVirtualKeyboard();
 }
 
 function selectLedCalibrationMidi(midi) {
@@ -216,7 +216,7 @@ function selectLedCalibrationMidi(midi) {
     AppState.ledCalibrationSelectedMidi = Number(midi);
     syncLedCalibrationControls();
     WLEDController.clearLastSignature();
-    renderVirtualKeyboard();
+    window.PTVirtualKeyboard.renderVirtualKeyboard();
 }
 
 function nudgeLedCalibration(delta) {
@@ -277,7 +277,7 @@ function importLedCalibrationFromPayload(payload) {
     saveLedCalibration();
     updateLedKeyMapping();
     WLEDController.clearLastSignature();
-    renderVirtualKeyboard();
+    window.PTVirtualKeyboard.renderVirtualKeyboard();
     syncLedCalibrationControls();
 }
 
@@ -494,7 +494,7 @@ function applyLedBrightnessSettings({ rerender = true } = {}) {
     syncLedBrightnessControls();
     WLEDController.clearLastSignature();
     if (rerender) {
-        renderVirtualKeyboard();
+        window.PTVirtualKeyboard.renderVirtualKeyboard();
     }
 }
 
@@ -871,7 +871,7 @@ function setWledTransport(value, { save = true } = {}) {
 
     if (AppState.ledOutputMode === 'wled') {
         armWledIfNeeded(AppState.wledTransport === 'ddp' ? 'WLED ready. DDP selected.' : 'WLED ready.');
-        renderVirtualKeyboard();
+        window.PTVirtualKeyboard.renderVirtualKeyboard();
 
         if (AppState.wledTransport === 'ddp') {
             Promise.resolve().then(async () => {
@@ -1095,7 +1095,7 @@ function setLedOutputMode(value, { save = true } = {}) {
     }
 
     updateConnectionStatuses();
-    renderVirtualKeyboard();
+    window.PTVirtualKeyboard.renderVirtualKeyboard();
 }
 
 function setLedReverse(value, { save = true } = {}) {
@@ -1336,7 +1336,7 @@ function setPlayerPianoType(value, { save = true, rerender = true } = {}) {
     AppState.ledPreviewTraversalIndex = -1;
 
     if (rerender) {
-        renderVirtualKeyboard();
+        window.PTVirtualKeyboard.renderVirtualKeyboard();
     }
 }
 
@@ -2082,7 +2082,7 @@ const WLEDController = {
             requestAnimationFrame(() => {
                 if (!this.ensureConfigured()) return;
                 this.clearLastSignature();
-                renderVirtualKeyboard();
+                window.PTVirtualKeyboard.renderVirtualKeyboard();
             });
 
             return true;
@@ -2231,7 +2231,7 @@ const WLEDController = {
                 LedEngine.renderOutputs();
             } else {
                 this.clearLastSignature();
-                renderVirtualKeyboard();
+                window.PTVirtualKeyboard.renderVirtualKeyboard();
             }
         }
     }

@@ -1,0 +1,2234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Piano Trainer Studio — Regression Tests</title>
+<style>
+    :root { color-scheme: light dark; }
+    body { font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 16px; max-width: 920px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 18px 0 6px; border-bottom: 1px solid #8884; padding-bottom: 2px; }
+    .summary { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-weight: 600; }
+    .summary.pass { background: #1b6e2c22; color: #1b6e2c; }
+    .summary.fail { background: #b3261e22; color: #b3261e; }
+    ol.tests { list-style: none; padding: 0; margin: 0; }
+    li.test { padding: 4px 8px; border-radius: 4px; margin: 2px 0; }
+    li.test.pass { color: #1b6e2c; }
+    li.test.fail { color: #b3261e; background: #b3261e14; }
+    li.test .name { font-weight: 600; }
+    li.test .err { display: block; margin-top: 2px; white-space: pre-wrap; color: inherit; opacity: .85; }
+    code { background: #8882; padding: 1px 4px; border-radius: 3px; }
+    .meta { opacity: .7; margin-bottom: 8px; }
+    button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #8884; background: transparent; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Piano Trainer Studio — Regression Tests</h1>
+<div class="meta" id="meta">Loading…</div>
+<div id="summary"></div>
+<div id="results"></div>
+<button id="rerun" type="button" style="margin-top:12px">Re-run</button>
+<div id="osmd-test-container" style="position:absolute;left:-99999px;width:800px;height:400px;overflow:hidden"></div>
+
+<script>
+'use strict';
+
+// ============================================================
+// Minimal test runner — no framework, no deps.
+// Usage:
+//   group('name', () => { test('foo', () => assert.eq(1+1, 2)); });
+// ============================================================
+
+const __results = [];
+let __currentGroup = 'misc';
+let __failed = 0;
+let __passed = 0;
+
+function group(name, fn) {
+    const previous = __currentGroup;
+    __currentGroup = name;
+    try { fn(); }
+    catch (e) {
+        __failed++;
+        __results.push({ group: name, name: '<group threw>', pass: false, err: String(e && e.stack || e) });
+    }
+    __currentGroup = previous;
+}
+
+function test(name, fn) {
+    try {
+        fn();
+        __passed++;
+        __results.push({ group: __currentGroup, name, pass: true });
+    } catch (e) {
+        __failed++;
+        __results.push({ group: __currentGroup, name, pass: false, err: String(e && e.stack || e) });
+    }
+}
+
+const assert = {
+    ok(cond, msg) {
+        if (!cond) throw new Error(msg || 'expected truthy');
+    },
+    eq(actual, expected, msg) {
+        if (actual !== expected) {
+            throw new Error((msg ? msg + ' — ' : '') + 'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
+        }
+    },
+    near(actual, expected, eps, msg) {
+        if (!(Math.abs(actual - expected) <= eps)) {
+            throw new Error((msg ? msg + ' — ' : '') + 'expected ' + expected + ' (±' + eps + '), got ' + actual);
+        }
+    },
+    deepEq(actual, expected, msg) {
+        const a = JSON.stringify(actual);
+        const b = JSON.stringify(expected);
+        if (a !== b) throw new Error((msg ? msg + ' — ' : '') + 'expected ' + b + ', got ' + a);
+    },
+    throws(fn, msg) {
+        let threw = false;
+        try { fn(); } catch (_) { threw = true; }
+        if (!threw) throw new Error(msg || 'expected throw');
+    }
+};
+
+// ============================================================
+// Load modules under test (load order matters — app-boot mirrors production order)
+// ============================================================
+
+function loadScript(src) {
+    return new Promise((resolve, reject) => {
+        const tag = document.createElement('script');
+        tag.src = src;
+        tag.onload = () => resolve();
+        tag.onerror = () => reject(new Error('Failed to load ' + src));
+        document.head.appendChild(tag);
+    });
+}
+
+async function loadModules() {
+    await loadScript('js/trainer-helpers.js');
+    await loadScript('js/mxl-parser.js');
+    await loadScript('js/transpose/transpose-engine.js');
+    await loadScript('js/trainer-timing.js');
+    await loadScript('js/staff-id.js');
+    await loadScript('js/led-preview.js');
+    await loadScript('js/midi-routing.js');
+    window.AppState = {
+        pseudoFullscreenActive: false,
+        fullscreenOnPlay: false,
+        mode: 'realtime',
+        modeSettings: {
+            realtime: { practice: { left: true, right: true }, playback: { left: true, right: true } },
+            wait: { practice: { left: true, right: true }, playback: { left: false, right: false } },
+            follow: { practice: { left: false, right: true }, playback: { left: true, right: false } }
+        },
+        practice: { left: true, right: true },
+        playback: { left: true, right: true },
+        hands: { left: 2, right: 1 },
+        isPlaying: false,
+        countInActive: false,
+        pendingAudio: [{ stub: 1 }],
+        followAdvanceInfo: { stub: 1 },
+        currentExpectedContext: { stub: 1 },
+        earlyGraceReservations: new Map([[60, { stub: 1 }]]),
+        isAudioBusy: true,
+        expectedNotes: [{ stub: 1 }],
+        activeNoteLabels: [{ stub: 1 }],
+        realtimeWrongPressInCurrentContext: true,
+        preExpectedHeldNotes: new Set([60, 64]),
+        lastLedPreviewEvents: [{ stub: 1 }],
+        ledPreviewTraversalIndex: 5,
+        ledOutputMode: 'none',
+        scoreNoteLabels: [],
+        score: { correct: 0, wrong: 0 },
+        anchorTime: 0,
+        baseBpm: 120,
+        speedPercent: 1
+    };
+
+    // Transport globals (mocks — only what's needed by the functions under test)
+    window.Tone = { Transport: { start: () => {}, stop: () => {}, pause: () => {}, bpm: { value: 120 } }, now: () => 0 };
+    window.osmd = { cursor: { show: () => {}, reset: () => {}, Iterator: { CurrentMeasureIndex: 0 } }, IsReadyToRender: () => false };
+    window.pianoSampler = { releaseAll: () => {} };
+    window.lowLatencyPlaybackSynth = { releaseAll: () => {} };
+    window.midiAccess = null;
+    window.getMidiOutStatus = (b) => b;
+    window.clearVisuals = () => {};
+    window.refreshScoreNoteLabelsFromCursor = () => {};
+    window.renderFeedbackOverlay = () => {};
+    window.clearScheduledMetronomeEvents = () => {};
+    window.stopWaitModeMetronome = () => {};
+    window.clearTempoVisualPulse = () => {};
+    window.applyToneLatencyProfileForMode = () => {};
+    window.wipeHardwareLEDs = () => {};
+    window.WLEDController = { forceClear: () => Promise.resolve() };
+    window.GeometryEngine = { clearSvgFeedback: () => {} };
+    window.updateScoreDisplay = () => {};
+    window.preserveMusicAreaScroll = (cb) => cb();
+    window.ensureLedPreviewTimelineBuilt = () => {};
+    window.doCountInAndStart = (cb) => cb();
+    window.handleAutoScroll = () => {};
+    window.startWaitModeMetronome = () => {};
+    window.playbackLoop = () => {};
+    window.hideToolbarPanels = () => {};
+    window.ensureLiveAudioReady = () => Promise.resolve();
+
+    await loadScript('js/trainer-mode.js');
+    await loadScript('js/fullscreen.js');
+    await loadScript('js/transport.js');
+    await loadScript('js/looper-state.js');
+    await loadScript('js/playback.js');
+    await loadScript('js/keyboard-input.js');
+    await loadScript('assets/js/opensheetmusicdisplay.min.js');
+}
+
+// ============================================================
+// Tests
+// ============================================================
+
+function runTests() {
+    __results.length = 0;
+    __asyncPromises.length = 0;
+    __failed = 0; __passed = 0;
+
+    // ---- helpers used by tests below (must be defined before any test() call) ----
+    const CRC_TABLE = (() => {
+        const t = new Uint32Array(256);
+        for (let n = 0; n < 256; n++) {
+            let c = n;
+            for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+            t[n] = c >>> 0;
+        }
+        return t;
+    })();
+
+    function crc32(bytes) {
+        let c = 0xffffffff;
+        for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+        return (c ^ 0xffffffff) >>> 0;
+    }
+
+    // ---- trainer-helpers.js ----
+    group('PTHelpers', () => {
+        test('parseStaffAssignmentValue: positive integer', () => {
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue('3'), 3);
+        });
+        test('parseStaffAssignmentValue: empty/null/dash → null', () => {
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue(''), null);
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue('-'), null);
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue(null), null);
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue(undefined), null);
+        });
+        test('parseStaffAssignmentValue: non-numeric → null', () => {
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue('abc'), null);
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue('0'), null);
+            assert.eq(window.PTHelpers.parseStaffAssignmentValue('-2'), null);
+        });
+        test('formatStaffAssignmentValue: round-trip', () => {
+            assert.eq(window.PTHelpers.formatStaffAssignmentValue('5'), '5');
+            assert.eq(window.PTHelpers.formatStaffAssignmentValue(''), '');
+            assert.eq(window.PTHelpers.formatStaffAssignmentValue('x'), '');
+            assert.eq(window.PTHelpers.formatStaffAssignmentValue(7), '7');
+        });
+        test('getScoreFileTypeFromName: by extension', () => {
+            assert.eq(window.PTHelpers.getScoreFileTypeFromName('a.xml'), 'xml');
+            assert.eq(window.PTHelpers.getScoreFileTypeFromName('A.MUSICXML'), 'musicxml');
+            assert.eq(window.PTHelpers.getScoreFileTypeFromName('b.mxl'), 'mxl');
+            assert.eq(window.PTHelpers.getScoreFileTypeFromName('note.txt'), 'xml');
+            assert.eq(window.PTHelpers.getScoreFileTypeFromName(''), 'xml');
+        });
+        test('getScoreDisplayTitle: strips extension', () => {
+            assert.eq(window.PTHelpers.getScoreDisplayTitle('Song.MUSICXML', 'fallback'), 'Song');
+            assert.eq(window.PTHelpers.getScoreDisplayTitle('song.xml', 'Untitled'), 'song');
+            assert.eq(window.PTHelpers.getScoreDisplayTitle('song.mxl', 'Untitled'), 'song');
+            assert.eq(window.PTHelpers.getScoreDisplayTitle('', 'Untitled'), 'Untitled');
+            assert.eq(window.PTHelpers.getScoreDisplayTitle('   .xml  ', 'X'), 'X');
+        });
+        test('getMetronomeMidiVelocity: scales with volume', () => {
+            assert.eq(window.PTHelpers.getMetronomeMidiVelocity(100, 100), 100);
+            assert.eq(window.PTHelpers.getMetronomeMidiVelocity(50, 100), 50);
+            assert.eq(window.PTHelpers.getMetronomeMidiVelocity(0, 100), 1);
+            assert.eq(window.PTHelpers.getMetronomeMidiVelocity(200, 100), 100);
+            assert.eq(window.PTHelpers.getMetronomeMidiVelocity(50, 200), 64);
+            assert.eq(window.PTHelpers.getMetronomeMidiVelocity('bad', 100), 1);
+        });
+
+        test('normalizeZoomValue: clamps to 50-150', () => {
+            assert.eq(window.PTHelpers.normalizeZoomValue(100), 100);
+            assert.eq(window.PTHelpers.normalizeZoomValue(0), 50);
+            assert.eq(window.PTHelpers.normalizeZoomValue(999), 150);
+            assert.eq(window.PTHelpers.normalizeZoomValue(50), 50);
+            assert.eq(window.PTHelpers.normalizeZoomValue(150), 150);
+        });
+
+        test('normalizeZoomValue: parses strings and rejects non-numeric', () => {
+            assert.eq(window.PTHelpers.normalizeZoomValue('75'), 75);
+            assert.eq(window.PTHelpers.normalizeZoomValue('200'), 150);
+            assert.eq(window.PTHelpers.normalizeZoomValue('abc'), null);
+            assert.eq(window.PTHelpers.normalizeZoomValue(''), null);
+            assert.eq(window.PTHelpers.normalizeZoomValue(null), null);
+        });
+
+        test('getMidiOutExpressionValue: scales percent → MIDI 0-127', () => {
+            assert.eq(window.PTHelpers.getMidiOutExpressionValue(0), 0);
+            assert.eq(window.PTHelpers.getMidiOutExpressionValue(100), 127);
+            assert.eq(window.PTHelpers.getMidiOutExpressionValue(50), 64);
+            assert.eq(window.PTHelpers.getMidiOutExpressionValue(150), 127, 'clamps high');
+            assert.eq(window.PTHelpers.getMidiOutExpressionValue(-10), 0, 'clamps low');
+            assert.eq(window.PTHelpers.getMidiOutExpressionValue('bad'), 0);
+        });
+
+        test('getNoteTie: null when note has no tie', () => {
+            assert.eq(window.PTHelpers.getNoteTie(null), null);
+            assert.eq(window.PTHelpers.getNoteTie(undefined), null);
+            assert.eq(window.PTHelpers.getNoteTie({}), null);
+            assert.eq(window.PTHelpers.getNoteTie({ tie: { Notes: [] } }), null);
+        });
+
+        test('getNoteTie: exposes StartNote/EndNote/Notes/NextNote', () => {
+            const a = { halfTone: 60 }, b = { halfTone: 60 }, c = { halfTone: 60 };
+            const tieObj = { Notes: [a, b, c] };
+            a.tie = b.tie = c.tie = tieObj;
+            const tie = window.PTHelpers.getNoteTie(a);
+            assert.eq(tie.StartNote, a);
+            assert.eq(tie.EndNote, c);
+            assert.eq(tie.Notes.length, 3);
+            assert.eq(tie.NextNote, b);
+            assert.eq(window.PTHelpers.getNoteTie(b).NextNote, c);
+            assert.eq(window.PTHelpers.getNoteTie(c).NextNote, null);
+        });
+    });
+
+    // ---- playback.js (seams extracted from trainer-core.js playbackLoop) ----
+    group('PTPlayback', () => {
+        test('computeWaitSeconds: matches beats * 60 / (bpm * speedPercent)', () => {
+            assert.near(window.PTPlayback.computeWaitSeconds(1, 120, 1), 0.5, 1e-9);
+            assert.near(window.PTPlayback.computeWaitSeconds(2, 120, 1), 1.0, 1e-9);
+            assert.near(window.PTPlayback.computeWaitSeconds(1, 60, 1), 1.0, 1e-9);
+        });
+        test('computeWaitSeconds: speedPercent scales inversely', () => {
+            assert.near(window.PTPlayback.computeWaitSeconds(1, 120, 0.5), 1.0, 1e-9);
+            assert.near(window.PTPlayback.computeWaitSeconds(1, 120, 2), 0.25, 1e-9);
+        });
+
+        test('advanceAnchorTime: wait/follow resets to now + waitSeconds (no drift)', () => {
+            assert.near(window.PTPlayback.advanceAnchorTime(100, 50, 0.5, 'wait'), 50.5, 1e-9);
+            assert.near(window.PTPlayback.advanceAnchorTime(100, 50, 0.5, 'follow'), 50.5, 1e-9);
+        });
+        test('advanceAnchorTime: realtime/other accumulates (drift source)', () => {
+            assert.near(window.PTPlayback.advanceAnchorTime(100, 50, 0.5, 'realtime'), 100.5, 1e-9);
+            assert.near(window.PTPlayback.advanceAnchorTime(100, 50, 0.5, 'idle'), 100.5, 1e-9);
+        });
+
+        test('clampTimeToWaitMs: positive when anchor ahead of now', () => {
+            assert.eq(window.PTPlayback.clampTimeToWaitMs(10.5, 10), 500);
+        });
+        test('clampTimeToWaitMs: zero when anchor equals now', () => {
+            assert.eq(window.PTPlayback.clampTimeToWaitMs(10, 10), 0);
+        });
+        test('clampTimeToWaitMs: clamps to zero when anchor behind now', () => {
+            assert.eq(window.PTPlayback.clampTimeToWaitMs(9.5, 10), 0);
+        });
+
+        test('shouldRestartLoopAtBoundary: end reached + loop enabled → true', () => {
+            assert.ok(window.PTPlayback.shouldRestartLoopAtBoundary({ isEndReached: true, currentMeasureIdx: 4, isLoopEnabled: true, maxLoop: 8 }));
+        });
+        test('shouldRestartLoopAtBoundary: past maxLoop + loop enabled → true', () => {
+            assert.ok(window.PTPlayback.shouldRestartLoopAtBoundary({ isEndReached: false, currentMeasureIdx: 8, isLoopEnabled: true, maxLoop: 8 }));
+            assert.ok(window.PTPlayback.shouldRestartLoopAtBoundary({ isEndReached: false, currentMeasureIdx: 9, isLoopEnabled: true, maxLoop: 8 }));
+        });
+        test('shouldRestartLoopAtBoundary: loop disabled → false at end', () => {
+            assert.ok(!window.PTPlayback.shouldRestartLoopAtBoundary({ isEndReached: true, currentMeasureIdx: 8, isLoopEnabled: false, maxLoop: 8 }));
+        });
+        test('shouldRestartLoopAtBoundary: within bounds + loop enabled → false', () => {
+            assert.ok(!window.PTPlayback.shouldRestartLoopAtBoundary({ isEndReached: false, currentMeasureIdx: 3, isLoopEnabled: true, maxLoop: 8 }));
+        });
+        test('shouldRestartLoopAtBoundary: maxLoop boundary (currentIdx + 1 === maxLoop + 1) is exclusive', () => {
+            assert.ok(window.PTPlayback.shouldRestartLoopAtBoundary({ isEndReached: false, currentMeasureIdx: 8, isLoopEnabled: true, maxLoop: 8 }));
+        });
+
+        test('classifyNoteScheduleBranch: wait + expectedNotes + not practicing → defer (pendingAudio)', () => {
+            assert.ok(window.PTPlayback.classifyNoteScheduleBranch({ mode: 'wait', expectedNotesLength: 3, isPracticingThisHand: false }));
+        });
+        test('classifyNoteScheduleBranch: follow + expectedNotes + not practicing → defer', () => {
+            assert.ok(window.PTPlayback.classifyNoteScheduleBranch({ mode: 'follow', expectedNotesLength: 1, isPracticingThisHand: false }));
+        });
+        test('classifyNoteScheduleBranch: realtime → always schedule', () => {
+            assert.ok(!window.PTPlayback.classifyNoteScheduleBranch({ mode: 'realtime', expectedNotesLength: 3, isPracticingThisHand: false }));
+        });
+        test('classifyNoteScheduleBranch: wait + no expectedNotes → schedule', () => {
+            assert.ok(!window.PTPlayback.classifyNoteScheduleBranch({ mode: 'wait', expectedNotesLength: 0, isPracticingThisHand: false }));
+        });
+        test('classifyNoteScheduleBranch: wait + practicing this hand → schedule', () => {
+            assert.ok(!window.PTPlayback.classifyNoteScheduleBranch({ mode: 'wait', expectedNotesLength: 3, isPracticingThisHand: true }));
+        });
+
+        test('shouldDeferFollowScheduling: follow + expectedNotes → defer metronome', () => {
+            assert.ok(window.PTPlayback.shouldDeferFollowScheduling('follow', 3));
+        });
+        test('shouldDeferFollowScheduling: follow + no expectedNotes → schedule', () => {
+            assert.ok(!window.PTPlayback.shouldDeferFollowScheduling('follow', 0));
+        });
+        test('shouldDeferFollowScheduling: wait/realtime never defer', () => {
+            assert.ok(!window.PTPlayback.shouldDeferFollowScheduling('wait', 5));
+            assert.ok(!window.PTPlayback.shouldDeferFollowScheduling('realtime', 5));
+        });
+
+        test('computeLoopRestartSteps: minLoop=1 → 0 steps (cursor stays at measure 0)', () => {
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: 1, totalMeasures: 10 }), 0);
+        });
+        test('computeLoopRestartSteps: minLoop=5 → 4 steps (0-based indexing)', () => {
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: 5, totalMeasures: 10 }), 4);
+        });
+        test('computeLoopRestartSteps: clamps to totalMeasures - 1 when minLoop exceeds score', () => {
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: 15, totalMeasures: 10 }), 9);
+        });
+        test('computeLoopRestartSteps: minLoop=0 / negative / NaN → 0 steps', () => {
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: 0, totalMeasures: 10 }), 0);
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: -1, totalMeasures: 10 }), 0);
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: NaN, totalMeasures: 10 }), 0);
+        });
+        test('computeLoopRestartSteps: degenerate totalMeasures=0 → 0 steps', () => {
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: 5, totalMeasures: 0 }), 0);
+        });
+        test('computeLoopRestartSteps: totalMeasures missing/invalid → unguarded (uses target)', () => {
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: 5 }), 4);
+            assert.eq(window.PTPlayback.computeLoopRestartSteps({ minLoop: 5, totalMeasures: NaN }), 4);
+        });
+
+        test('shouldPauseAtEnd: end reached + loop disabled → pause', () => {
+            assert.ok(window.PTPlayback.shouldPauseAtEnd({ isEndReached: true, isLoopEnabled: false }));
+        });
+        test('shouldPauseAtEnd: end reached + loop enabled → do not pause (restart path)', () => {
+            assert.ok(!window.PTPlayback.shouldPauseAtEnd({ isEndReached: true, isLoopEnabled: true }));
+        });
+        test('shouldPauseAtEnd: not at end → do not pause', () => {
+            assert.ok(!window.PTPlayback.shouldPauseAtEnd({ isEndReached: false, isLoopEnabled: false }));
+            assert.ok(!window.PTPlayback.shouldPauseAtEnd({ isEndReached: false, isLoopEnabled: true }));
+        });
+
+        test('shouldAdoptMeasureTempo: tempo set and differs → adopt', () => {
+            assert.ok(window.PTPlayback.shouldAdoptMeasureTempo({ TempoInBPM: 90 }, 120));
+            assert.ok(window.PTPlayback.shouldAdoptMeasureTempo({ TempoInBPM: 60 }, 120));
+        });
+        test('shouldAdoptMeasureTempo: tempo set but matches current → no-op', () => {
+            assert.ok(!window.PTPlayback.shouldAdoptMeasureTempo({ TempoInBPM: 120 }, 120));
+        });
+        test('shouldAdoptMeasureTempo: missing measure → false', () => {
+            assert.ok(!window.PTPlayback.shouldAdoptMeasureTempo(null, 120));
+            assert.ok(!window.PTPlayback.shouldAdoptMeasureTempo(undefined, 120));
+        });
+        test('shouldAdoptMeasureTempo: measure without TempoInBPM (missing/0) → false', () => {
+            assert.ok(!window.PTPlayback.shouldAdoptMeasureTempo({}, 120));
+            assert.ok(!window.PTPlayback.shouldAdoptMeasureTempo({ TempoInBPM: 0 }, 120));
+            assert.ok(!window.PTPlayback.shouldAdoptMeasureTempo({ TempoInBPM: null }, 120));
+        });
+
+        test('shouldUseCountInForLoopRestart: true → defer restart to doCountInAndStart', () => {
+            assert.ok(window.PTPlayback.shouldUseCountInForLoopRestart(true));
+        });
+        test('shouldUseCountInForLoopRestart: false / missing → restart immediately', () => {
+            assert.ok(!window.PTPlayback.shouldUseCountInForLoopRestart(false));
+            assert.ok(!window.PTPlayback.shouldUseCountInForLoopRestart(undefined));
+            assert.ok(!window.PTPlayback.shouldUseCountInForLoopRestart(null));
+            assert.ok(!window.PTPlayback.shouldUseCountInForLoopRestart(0));
+        });
+
+        test('getCombinedTieLength: null / missing note → 0', () => {
+            assert.eq(window.PTPlayback.getCombinedTieLength(null), 0);
+            assert.eq(window.PTPlayback.getCombinedTieLength(undefined), 0);
+        });
+
+        test('getCombinedTieLength: single note, no tie → just its length', () => {
+            const note = { Length: { RealValue: 0.25 }, DotsXml: 0 };
+            assert.eq(window.PTPlayback.getCombinedTieLength(note), 0.25);
+        });
+
+        test('getCombinedTieLength: single dotted note → dotted length', () => {
+            const note = { Length: { RealValue: 0.25 }, DotsXml: 1 };
+            assert.near(window.PTPlayback.getCombinedTieLength(note), 0.375, 1e-9);
+        });
+
+        test('getCombinedTieLength: same-pitch tie chain sums lengths from StartNote', () => {
+            const n1 = { Length: { RealValue: 0.25 }, DotsXml: 0, halfTone: 60 };
+            const n2 = { Length: { RealValue: 0.25 }, DotsXml: 0, halfTone: 60 };
+            const n3 = { Length: { RealValue: 0.5 }, DotsXml: 0, halfTone: 60 };
+            n1.tie = { Notes: [n1, n2, n3] };
+            n2.tie = { Notes: [n1, n2, n3] };
+            n3.tie = { Notes: [n1, n2, n3] };
+            assert.near(window.PTPlayback.getCombinedTieLength(n1), 1.0, 1e-9);
+            // Mid-chain: walks forward only (n2 → n3), returns chain remainder
+            assert.near(window.PTPlayback.getCombinedTieLength(n2), 0.75, 1e-9);
+        });
+
+        test('getCombinedTieLength: stops at pitch change (no cross-pitch accumulation)', () => {
+            const n1 = { Length: { RealValue: 0.25 }, DotsXml: 0, halfTone: 60 };
+            const n2 = { Length: { RealValue: 0.25 }, DotsXml: 0, halfTone: 62 };
+            n1.tie = { Notes: [n1, n2] };
+            n2.tie = { Notes: [n1, n2] };
+            assert.near(window.PTPlayback.getCombinedTieLength(n1), 0.25, 1e-9);
+        });
+
+        test('getCombinedTieLength: tie with no next note → just first note length', () => {
+            const n1 = { Length: { RealValue: 0.5 }, DotsXml: 0, halfTone: 60 };
+            n1.tie = { Notes: [n1] };
+            assert.eq(window.PTPlayback.getCombinedTieLength(n1), 0.5);
+        });
+    });
+
+    // ---- trainer-helpers.js (continued: getNoteEffectiveLength) ----
+    group('PTHelpers', () => {
+        test('getNoteEffectiveLength: base length when no dots', () => {
+            assert.eq(window.PTHelpers.getNoteEffectiveLength({ Length: { RealValue: 0.25 }, DotsXml: 0 }), 0.25);
+            assert.eq(window.PTHelpers.getNoteEffectiveLength({ Length: { RealValue: 0.5 }, DotsXml: 0 }), 0.5);
+        });
+
+        test('getNoteEffectiveLength: dotted = base × (2 − ½ⁿ)', () => {
+            assert.near(window.PTHelpers.getNoteEffectiveLength({ Length: { RealValue: 0.25 }, DotsXml: 1 }), 0.375, 1e-9);
+            assert.near(window.PTHelpers.getNoteEffectiveLength({ Length: { RealValue: 0.25 }, DotsXml: 2 }), 0.4375, 1e-9);
+            assert.near(window.PTHelpers.getNoteEffectiveLength({ Length: { RealValue: 0.25 }, DotsXml: 3 }), 0.46875, 1e-9);
+            assert.near(window.PTHelpers.getNoteEffectiveLength({ Length: { RealValue: 0.5 }, DotsXml: 1 }), 0.75, 1e-9);
+        });
+
+        test('getNoteEffectiveLength: tolerates missing fields', () => {
+            assert.eq(window.PTHelpers.getNoteEffectiveLength(null), 0);
+            assert.eq(window.PTHelpers.getNoteEffectiveLength({}), 0);
+            assert.eq(window.PTHelpers.getNoteEffectiveLength({ Length: {} }), 0);
+        });
+    });
+
+    // ---- trainer-timing.js ----
+    group('PTTiming.getRemainingMeasureWaitWhole', () => {
+        const getInfo = (info) => () => info;
+
+        test('returns fallback when no getMeasureTimingInfo', () => {
+            const w = window.PTTiming.getRemainingMeasureWaitWhole({ currentMeasureIdx: 0, currentTimestamp: 0, fallbackLength: 0.5 });
+            assert.near(w, 0.5, 1e-9);
+        });
+
+        test('returns fallback when measure info missing fields', () => {
+            const w = window.PTTiming.getRemainingMeasureWaitWhole({
+                currentMeasureIdx: 0, currentTimestamp: 1, fallbackLength: 0.25, getMeasureTimingInfo: getInfo({})
+            });
+            assert.near(w, 0.25, 1e-9);
+        });
+
+        test('computes remaining = measureEnd - currentTimestamp', () => {
+            const w = window.PTTiming.getRemainingMeasureWaitWhole({
+                currentMeasureIdx: 0, currentTimestamp: 1, fallbackLength: 1,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, actualLengthWhole: 2 })
+            });
+            assert.near(w, 1, 1e-9);
+        });
+
+        test('falls back when currentTimestamp is past measure end', () => {
+            const w = window.PTTiming.getRemainingMeasureWaitWhole({
+                currentMeasureIdx: 0, currentTimestamp: 5, fallbackLength: 0.75,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, actualLengthWhole: 2 })
+            });
+            assert.near(w, 0.75, 1e-9);
+        });
+
+        test('uses nominalMeasureLengthWhole when actualLengthWhole missing', () => {
+            const w = window.PTTiming.getRemainingMeasureWaitWhole({
+                currentMeasureIdx: 0, currentTimestamp: 0.5, fallbackLength: 1,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, nominalMeasureLengthWhole: 3 })
+            });
+            assert.near(w, 2.5, 1e-9);
+        });
+
+        test('clamp tiny negative to epsilon', () => {
+            const w = window.PTTiming.getRemainingMeasureWaitWhole({
+                currentMeasureIdx: 0, currentTimestamp: 2.00000001, fallbackLength: 0.5,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, actualLengthWhole: 2 })
+            });
+            assert.near(w, 0.5, 1e-9);
+        });
+    });
+
+    group('PTTiming.getTraversalBeatsToWait', () => {
+        const getInfo = (info) => () => info;
+
+        test('backward jump uses remaining measure * 4', () => {
+            const w = window.PTTiming.getTraversalBeatsToWait({
+                currentMeasureIdx: 4, currentTimestamp: 0.5, nextMeasureIdx: 1, nextTimestamp: 0,
+                fallbackLength: 1,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, actualLengthWhole: 2 })
+            });
+            assert.near(w, 6, 1e-9);
+        });
+
+        test('skip ahead more than one measure uses remaining measure * 4', () => {
+            const w = window.PTTiming.getTraversalBeatsToWait({
+                currentMeasureIdx: 0, currentTimestamp: 0.25, nextMeasureIdx: 5, nextTimestamp: 4,
+                fallbackLength: 1,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, actualLengthWhole: 1 })
+            });
+            assert.near(w, 3, 1e-9);
+        });
+
+        test('next measure uses (nextTimestamp - currentTimestamp) * 4', () => {
+            const w = window.PTTiming.getTraversalBeatsToWait({
+                currentMeasureIdx: 0, currentTimestamp: 0.25, nextMeasureIdx: 1, nextTimestamp: 1,
+                fallbackLength: 1,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, actualLengthWhole: 1 })
+            });
+            assert.near(w, 3, 1e-9);
+        });
+
+        test('zero delta returns 0', () => {
+            const w = window.PTTiming.getTraversalBeatsToWait({
+                currentMeasureIdx: 0, currentTimestamp: 0.5, nextMeasureIdx: 1, nextTimestamp: 0.5,
+                fallbackLength: 1,
+                getMeasureTimingInfo: getInfo({ startTimestamp: 0, actualLengthWhole: 1 })
+            });
+            assert.near(w, 0, 1e-9);
+        });
+    });
+
+    group('PTTiming.getMeasureTimingInfo', () => {
+        const fakeOsmd = (sig) => ({
+            Sheet: { SourceMeasures: [{ ActiveTimeSignature: sig }] }
+        });
+
+        test('returns 4/4 defaults when cache is empty', () => {
+            const cache = window.PTTiming._getMeasureTimingCache();
+            cache.length = 0;
+            const info = window.PTTiming.getMeasureTimingInfo(fakeOsmd({ Numerator: 4, Denominator: 4 }), 0);
+            assert.eq(info.numerator, 4);
+            assert.eq(info.denominator, 4);
+            assert.eq(info.startTimestamp, 0);
+            assert.near(info.actualLengthWhole, info.nominalMeasureLengthWhole, 1e-9);
+        });
+
+        test('uses cached actualLengthWhole and startTimestamp when present', () => {
+            const cache = window.PTTiming._getMeasureTimingCache();
+            cache.length = 0;
+            cache[0] = { startTimestamp: 2.5, actualLengthWhole: 1.75, nominalMeasureLengthWhole: 1, numerator: 4, denominator: 4 };
+            const info = window.PTTiming.getMeasureTimingInfo(fakeOsmd({ Numerator: 4, Denominator: 4 }), 0);
+            assert.near(info.actualLengthWhole, 1.75, 1e-9);
+            assert.near(info.startTimestamp, 2.5, 1e-9);
+        });
+    });
+
+    // ---- staff-id.js ----
+    group('PTStaff.getResolvedStaffAssignmentIdFromNote', () => {
+        const seedMap = (pairs) => {
+            const map = window.PTStaff._getStaffIdentityMap();
+            map.clear();
+            pairs.forEach(([staff, id]) => map.set(staff, id));
+        };
+        const staffA = { id: 7 };
+        const staffB = { id: 8 };
+
+        test('returns mapped id when ParentStaff is in the identity map', () => {
+            seedMap([[staffA, 3]]);
+            const note = { ParentStaff: staffA };
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromNote(note), 3);
+        });
+
+        test('falls back to lowercase parentStaff when ParentStaff missing', () => {
+            seedMap([[staffB, 5]]);
+            const note = { parentStaff: staffB };
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromNote(note), 5);
+        });
+
+        test('returns null when no staff candidate and no fallback id', () => {
+            seedMap([]);
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromNote({}), null);
+        });
+
+        test('falls back to ParentStaff.id when staff not in map', () => {
+            seedMap([]);
+            const note = { ParentStaff: { id: 9 } };
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromNote(note), 9);
+        });
+    });
+
+    group('PTStaff.getResolvedStaffAssignmentIdFromEntry', () => {
+        const seedMap = (pairs) => {
+            const map = window.PTStaff._getStaffIdentityMap();
+            map.clear();
+            pairs.forEach(([staff, id]) => map.set(staff, id));
+        };
+        const staff = { id: 4 };
+
+        test('uses first note of entry', () => {
+            seedMap([[staff, 2]]);
+            const entry = { Notes: [{ ParentStaff: staff }] };
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromEntry(entry), 2);
+        });
+
+        test('returns null for empty entry', () => {
+            seedMap([]);
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromEntry({}), null);
+        });
+    });
+
+    group('PTStaff.rebuildGlobalStaffIdentityMap', () => {
+        test('assigns sequential ids across instruments and staves', () => {
+            const fakeOsmd = {
+                Sheet: {
+                    Instruments: [
+                        { Staves: [{}, {}] },
+                        { Staves: [{}] }
+                    ]
+                }
+            };
+            const map = window.PTStaff.rebuildGlobalStaffIdentityMap(fakeOsmd);
+            assert.eq(map.size, 3);
+            const ids = Array.from(map.values());
+            assert.deepEq(ids, [1, 2, 3]);
+        });
+
+        test('returns empty map when osmd has no instruments', () => {
+            const map = window.PTStaff.rebuildGlobalStaffIdentityMap({});
+            assert.eq(map.size, 0);
+        });
+    });
+
+    // ---- led-preview.js ----
+    group('PTLedPreview.makeLedPreviewEntrySignature', () => {
+        const note = (midi, staffId = 0, rest = false, length = 1, tie = null) => ({
+            halfTone: midi - 12,
+            ParentStaff: { id: staffId },
+            isRest: rest ? () => true : () => false,
+            Length: length,
+            ...(tie && { NoteTie: tie })
+        });
+
+        test('returns empty string for empty entries', () => {
+            assert.eq(window.PTLedPreview.makeLedPreviewEntrySignature([]), '');
+            assert.eq(window.PTLedPreview.makeLedPreviewEntrySignature(null), '');
+        });
+
+        test('produces stable signature regardless of note order', () => {
+            const a = note(60);
+            const b = note(64);
+            const sig1 = window.PTLedPreview.makeLedPreviewEntrySignature([{ Notes: [a, b] }]);
+            const sig2 = window.PTLedPreview.makeLedPreviewEntrySignature([{ Notes: [b, a] }]);
+            assert.eq(sig1, sig2);
+        });
+
+        test('different content yields different signature', () => {
+            const a = note(60);
+            const b = note(64);
+            const sig1 = window.PTLedPreview.makeLedPreviewEntrySignature([{ Notes: [a] }]);
+            const sig2 = window.PTLedPreview.makeLedPreviewEntrySignature([{ Notes: [b] }]);
+            assert.ok(sig1 !== sig2);
+        });
+    });
+
+    group('PTLedPreview.findMatchingLedPreviewTimelineIndex', () => {
+        test('returns -1 for empty timeline', () => {
+            assert.eq(window.PTLedPreview.findMatchingLedPreviewTimelineIndex([], 0, 0, 'x'), -1);
+            assert.eq(window.PTLedPreview.findMatchingLedPreviewTimelineIndex(null, 0, 0, 'x'), -1);
+        });
+
+        test('finds match starting at 0', () => {
+            const tl = [
+                { measureIndex: 0, timestamp: 0, signature: 'a' },
+                { measureIndex: 1, timestamp: 0.5, signature: 'b' }
+            ];
+            assert.eq(window.PTLedPreview.findMatchingLedPreviewTimelineIndex(tl, 1, 0.5, 'b'), 1);
+        });
+
+        test('respects startIndex when searching forward', () => {
+            const tl = [
+                { measureIndex: 0, timestamp: 0, signature: 'a' },
+                { measureIndex: 0, timestamp: 0, signature: 'a' },
+                { measureIndex: 0, timestamp: 0, signature: 'a' }
+            ];
+            assert.eq(window.PTLedPreview.findMatchingLedPreviewTimelineIndex(tl, 0, 0, 'a', 2), 2);
+        });
+
+        test('returns -1 when no match', () => {
+            const tl = [{ measureIndex: 0, timestamp: 0, signature: 'a' }];
+            assert.eq(window.PTLedPreview.findMatchingLedPreviewTimelineIndex(tl, 0, 0, 'b'), -1);
+        });
+    });
+
+    group('PTLedPreview.getLedStatePriority / chooseHigherPriorityLedState', () => {
+        test('expected beats future beats pressed beats active', () => {
+            assert.ok(window.PTLedPreview.getLedStatePriority('expected-l') > window.PTLedPreview.getLedStatePriority('future1-l'));
+            assert.ok(window.PTLedPreview.getLedStatePriority('future1-l') > window.PTLedPreview.getLedStatePriority('pressed-l'));
+            assert.ok(window.PTLedPreview.getLedStatePriority('pressed-l') > window.PTLedPreview.getLedStatePriority('active'));
+        });
+
+        test('unknown state has priority 0', () => {
+            assert.eq(window.PTLedPreview.getLedStatePriority('garbage'), 0);
+            assert.eq(window.PTLedPreview.getLedStatePriority(null), 0);
+        });
+
+        test('chooser picks the higher-priority candidate', () => {
+            assert.eq(window.PTLedPreview.chooseHigherPriorityLedState('pressed-l', 'expected-l'), 'expected-l');
+            assert.eq(window.PTLedPreview.chooseHigherPriorityLedState('expected-l', 'future1-l'), 'expected-l');
+        });
+    });
+
+    group('PTLedPreview.applyLedFuturePreviewStates', () => {
+        test('adds new states without mutating input map', () => {
+            const base = new Map([[60, 'pressed-l']]);
+            const events = [{ notes: [{ midi: 64, state: 'future1-r' }] }];
+            const result = window.PTLedPreview.applyLedFuturePreviewStates(base, events);
+            assert.eq(result.get(60), 'pressed-l');
+            assert.eq(result.get(64), 'future1-r');
+            assert.eq(base.has(64), false);
+        });
+
+        test('higher-priority future state replaces existing base', () => {
+            const base = new Map([[60, 'pressed-l']]);
+            const events = [{ notes: [{ midi: 60, state: 'future1-l' }] }];
+            const result = window.PTLedPreview.applyLedFuturePreviewStates(base, events);
+            assert.eq(result.get(60), 'future1-l');
+        });
+
+        test('lower-priority future state does not replace higher base', () => {
+            const base = new Map([[60, 'expected-l']]);
+            const events = [{ notes: [{ midi: 60, state: 'future1-l' }] }];
+            const result = window.PTLedPreview.applyLedFuturePreviewStates(base, events);
+            assert.eq(result.get(60), 'expected-l');
+        });
+
+        test('empty preview events returns equivalent map', () => {
+            const base = new Map([[60, 'expected-l']]);
+            const result = window.PTLedPreview.applyLedFuturePreviewStates(base, []);
+            assert.eq(result.get(60), 'expected-l');
+        });
+    });
+
+    // ---- midi-routing.js ----
+    group('PTMidiRouting.getRoutingEnabledForRole', () => {
+        test('returns truthy when role enabled in bucket', () => {
+            assert.ok(window.PTMidiRouting.getRoutingEnabledForRole({ hands: true }, 'hands'));
+        });
+
+        test('returns falsy when role disabled', () => {
+            assert.ok(!window.PTMidiRouting.getRoutingEnabledForRole({ hands: false }, 'hands'));
+        });
+
+        test('returns falsy for null bucket', () => {
+            assert.ok(!window.PTMidiRouting.getRoutingEnabledForRole(null, 'hands'));
+        });
+
+        test('returns falsy for missing role key', () => {
+            assert.ok(!window.PTMidiRouting.getRoutingEnabledForRole({}, 'hands'));
+        });
+    });
+
+    group('PTMidiRouting.getSourceRoleKey', () => {
+        test('midi maps to instrument', () => {
+            assert.eq(window.PTMidiRouting.getSourceRoleKey('midi'), 'instrument');
+        });
+
+        test('ui maps to virtual', () => {
+            assert.eq(window.PTMidiRouting.getSourceRoleKey('ui'), 'virtual');
+        });
+
+        test('unknown source returns null', () => {
+            assert.eq(window.PTMidiRouting.getSourceRoleKey('nonsense'), null);
+        });
+    });
+
+    // ---- trainer-mode.js ----
+    group('PTMode.getDefaultStaffAssignment', () => {
+        test('defaults to right=1 left=2 when no osmd given', () => {
+            const d = window.PTMode.getDefaultStaffAssignment(null);
+            assert.eq(d.right, 1);
+            assert.eq(d.left, 2);
+        });
+
+        test('left is null when only one staff', () => {
+            const osmd = { GraphicSheet: { MeasureList: { 0: [{}] } } };
+            const d = window.PTMode.getDefaultStaffAssignment(osmd);
+            assert.eq(d.right, 1);
+            assert.eq(d.left, null);
+        });
+    });
+
+    group('PTMode.getAssignedHandRoleForStaff', () => {
+        test('returns "right" for AppState.hands.right', () => {
+            AppState.hands = { left: 2, right: 1 };
+            assert.eq(window.PTMode.getAssignedHandRoleForStaff(1), 'right');
+        });
+
+        test('returns "left" for AppState.hands.left', () => {
+            AppState.hands = { left: 2, right: 1 };
+            assert.eq(window.PTMode.getAssignedHandRoleForStaff(2), 'left');
+        });
+
+        test('returns null for unrelated staff', () => {
+            AppState.hands = { left: 2, right: 1 };
+            assert.eq(window.PTMode.getAssignedHandRoleForStaff(99), null);
+        });
+
+        test('returns null for non-finite staffId', () => {
+            assert.eq(window.PTMode.getAssignedHandRoleForStaff('x'), null);
+            assert.eq(window.PTMode.getAssignedHandRoleForStaff(null), null);
+            assert.eq(window.PTMode.getAssignedHandRoleForStaff(undefined), null);
+        });
+
+        test('coerces string numeric staffId', () => {
+            AppState.hands = { left: 2, right: 1 };
+            assert.eq(window.PTMode.getAssignedHandRoleForStaff('2'), 'left');
+        });
+    });
+
+    group('PTMode.getCurrentModeSettings', () => {
+        test('returns realtime settings when mode=realtime', () => {
+            AppState.mode = 'realtime';
+            AppState.modeSettings = {
+                realtime: { practice: { left: false, right: true }, playback: { left: true, right: false } }
+            };
+            const s = window.PTMode.getCurrentModeSettings();
+            assert.eq(s.practice.left, false);
+            assert.eq(s.playback.right, false);
+        });
+
+        test('returns wait settings when mode=wait', () => {
+            AppState.mode = 'wait';
+            AppState.modeSettings = {
+                wait: { practice: { left: true, right: false }, playback: { left: false, right: true } }
+            };
+            const s = window.PTMode.getCurrentModeSettings();
+            assert.eq(s.practice.right, false);
+            assert.eq(s.playback.left, false);
+        });
+
+        test('initializes missing mode bucket with defaults', () => {
+            AppState.mode = 'realtime';
+            AppState.modeSettings = {};
+            const s = window.PTMode.getCurrentModeSettings();
+            assert.eq(s.practice.left, true);
+            assert.eq(s.practice.right, true);
+            assert.ok(AppState.modeSettings.realtime);
+        });
+
+        test('follow mode normalizes practice/playback', () => {
+            AppState.mode = 'follow';
+            AppState.modeSettings = {
+                follow: { practice: { left: true, right: false }, playback: { left: true, right: false } }
+            };
+            window.PTMode.getCurrentModeSettings();
+            const f = AppState.modeSettings.follow;
+            assert.eq(f.practice.left, true);
+            assert.eq(f.practice.right, false);
+            assert.eq(f.playback.left, false);
+            assert.eq(f.playback.right, true);
+        });
+    });
+
+    group('PTMode.syncActiveHandStateFromMode', () => {
+        test('copies mode settings into AppState.practice/playback', () => {
+            AppState.mode = 'realtime';
+            AppState.modeSettings = {
+                realtime: { practice: { left: false, right: true }, playback: { left: true, right: false } }
+            };
+            AppState.practice = { left: true, right: true };
+            AppState.playback = { left: true, right: true };
+            window.PTMode.syncActiveHandStateFromMode();
+            assert.eq(AppState.practice.left, false);
+            assert.eq(AppState.practice.right, true);
+            assert.eq(AppState.playback.left, true);
+            assert.eq(AppState.playback.right, false);
+        });
+
+        test('coerces missing settings to false', () => {
+            AppState.mode = 'realtime';
+            AppState.modeSettings = {
+                realtime: { practice: {}, playback: { left: 1, right: 0 } }
+            };
+            AppState.practice = { left: true, right: true };
+            AppState.playback = { left: true, right: true };
+            window.PTMode.syncActiveHandStateFromMode();
+            assert.eq(AppState.practice.left, false);
+            assert.eq(AppState.practice.right, false);
+            assert.eq(AppState.playback.left, true);
+            assert.eq(AppState.playback.right, false);
+        });
+    });
+
+    group('PTMode.setFollowPracticeHand', () => {
+        test('setFollowPracticeHand("left") flips practice/playback and syncs when in follow mode', () => {
+            AppState.mode = 'follow';
+            AppState.modeSettings = {
+                follow: { practice: { left: false, right: true }, playback: { left: true, right: false } }
+            };
+            AppState.practice = { left: false, right: true };
+            AppState.playback = { left: true, right: false };
+            window.PTMode.setFollowPracticeHand('left');
+            const f = AppState.modeSettings.follow;
+            assert.eq(f.practice.left, true);
+            assert.eq(f.practice.right, false);
+            assert.eq(f.playback.left, false);
+            assert.eq(f.playback.right, true);
+            assert.eq(AppState.practice.left, true);
+            assert.eq(AppState.playback.right, true);
+        });
+
+        test('setFollowPracticeHand does not sync active state outside follow mode', () => {
+            AppState.mode = 'realtime';
+            AppState.modeSettings = {
+                realtime: { practice: { left: true, right: true }, playback: { left: true, right: true } },
+                follow: { practice: { left: true, right: true }, playback: { left: true, right: true } }
+            };
+            AppState.practice = { left: true, right: true };
+            AppState.playback = { left: true, right: true };
+            window.PTMode.setFollowPracticeHand('right');
+            assert.eq(AppState.practice.left, true, 'practice.left should not change when not in follow mode');
+        });
+    });
+
+    // ---- fullscreen.js ----
+    group('PTFullscreen.isFullscreenActive', () => {
+        test('false when no fullscreen element and pseudoFullscreenActive is false', () => {
+            AppState.pseudoFullscreenActive = false;
+            assert.ok(!window.PTFullscreen.isFullscreenActive());
+        });
+
+        test('true when pseudoFullscreenActive is set', () => {
+            AppState.pseudoFullscreenActive = true;
+            assert.ok(window.PTFullscreen.isFullscreenActive());
+            AppState.pseudoFullscreenActive = false;
+        });
+    });
+
+    group('PTFullscreen.requestOnPlayIfEnabled', () => {
+        test('does nothing when fullscreenOnPlay is false', () => {
+            AppState.fullscreenOnPlay = false;
+            AppState.pseudoFullscreenActive = false;
+            return window.PTFullscreen.requestOnPlayIfEnabled().then(() => {
+                assert.ok(!AppState.pseudoFullscreenActive);
+            });
+        });
+
+        test('does nothing when already fullscreen-active', () => {
+            AppState.fullscreenOnPlay = true;
+            AppState.pseudoFullscreenActive = true;
+            return window.PTFullscreen.requestOnPlayIfEnabled().then(() => {
+                assert.ok(AppState.pseudoFullscreenActive);
+            });
+        });
+    });
+
+    group('PTFullscreen.syncFullscreenUi', () => {
+        test('toggles body class and updates button attrs', () => {
+            document.body.classList.remove('app-fullscreen-active');
+            const button = document.createElement('button');
+            button.id = 'btn-score-fullscreen';
+            document.body.appendChild(button);
+            try {
+                AppState.pseudoFullscreenActive = true;
+                window.PTFullscreen.syncFullscreenUi();
+                assert.ok(document.body.classList.contains('app-fullscreen-active'));
+                assert.ok(button.classList.contains('is-active'));
+                assert.eq(button.getAttribute('aria-pressed'), 'true');
+                assert.eq(button.textContent, '🗗');
+
+                AppState.pseudoFullscreenActive = false;
+                window.PTFullscreen.syncFullscreenUi();
+                assert.ok(!document.body.classList.contains('app-fullscreen-active'));
+                assert.ok(!button.classList.contains('is-active'));
+                assert.eq(button.getAttribute('aria-pressed'), 'false');
+                assert.eq(button.textContent, '⛶');
+            } finally {
+                button.remove();
+                document.body.classList.remove('app-fullscreen-active');
+                AppState.pseudoFullscreenActive = false;
+            }
+        });
+    });
+
+    // ---- transport.js ----
+    group('PTTransport.clearTransientPlaybackState', () => {
+        function seedTransientState() {
+            AppState.pendingAudio = [1];
+            AppState.followAdvanceInfo = { x: 1 };
+            AppState.currentExpectedContext = { y: 1 };
+            AppState.earlyGraceReservations = new Map([[60, { z: 1 }]]);
+            AppState.isAudioBusy = true;
+            AppState.expectedNotes = [1];
+            AppState.activeNoteLabels = [1];
+            AppState.realtimeWrongPressInCurrentContext = true;
+            AppState.preExpectedHeldNotes = new Set([60]);
+        }
+
+        test('clears all transient fields', () => {
+            seedTransientState();
+            window.PTTransport.clearTransientPlaybackState();
+            assert.eq(AppState.pendingAudio.length, 0);
+            assert.eq(AppState.followAdvanceInfo, null);
+            assert.eq(AppState.currentExpectedContext, null);
+            assert.eq(AppState.earlyGraceReservations.size, 0);
+            assert.eq(AppState.isAudioBusy, false);
+            assert.eq(AppState.expectedNotes.length, 0);
+            assert.eq(AppState.activeNoteLabels.length, 0);
+            assert.eq(AppState.realtimeWrongPressInCurrentContext, false);
+            assert.eq(AppState.preExpectedHeldNotes.size, 0);
+        });
+
+        test('does NOT call clearVisuals by default', () => {
+            seedTransientState();
+            let called = false;
+            const original = window.clearVisuals;
+            window.clearVisuals = () => { called = true; };
+            try {
+                window.PTTransport.clearTransientPlaybackState();
+                assert.ok(!called, 'clearVisuals should not be called when clearVisualState is false');
+            } finally {
+                window.clearVisuals = original;
+            }
+        });
+
+        test('calls clearVisuals when clearVisualState=true', () => {
+            seedTransientState();
+            let called = false;
+            const original = window.clearVisuals;
+            window.clearVisuals = () => { called = true; };
+            try {
+                window.PTTransport.clearTransientPlaybackState({ clearVisualState: true });
+                assert.ok(called);
+            } finally {
+                window.clearVisuals = original;
+            }
+        });
+    });
+
+    group('PTTransport.pausePlaybackFromToolbar', () => {
+        function setupPauseSpy() {
+            const stubs = {
+                Tone: window.Tone,
+                clearScheduledMetronomeEvents: window.clearScheduledMetronomeEvents,
+                stopWaitModeMetronome: window.stopWaitModeMetronome,
+                silencePlaybackOutputsImmediately: window.silencePlaybackOutputsImmediately,
+                clearTempoVisualPulse: window.clearTempoVisualPulse,
+                applyToneLatencyProfileForMode: window.applyToneLatencyProfileForMode,
+                wipeHardwareLEDs: window.wipeHardwareLEDs,
+                updatePlayPauseButton: window.PTTransport.updatePlayPauseButton
+            };
+            let pauseCalls = 0, stopCalls = 0;
+            window.Tone = { Transport: { pause: () => { pauseCalls++; }, stop: () => { stopCalls++; } } };
+            window.clearScheduledMetronomeEvents = () => {};
+            window.stopWaitModeMetronome = () => {};
+            window.silencePlaybackOutputsImmediately = () => {};
+            window.clearTempoVisualPulse = () => {};
+            window.applyToneLatencyProfileForMode = () => {};
+            window.wipeHardwareLEDs = () => {};
+            return {
+                pauseCalls: () => pauseCalls,
+                stopCalls: () => stopCalls,
+                restore: () => {
+                    for (const [name, original] of Object.entries(stubs)) window[name] = original;
+                }
+            };
+        }
+
+        test('sets isPlaying=false and pauses Tone.Transport', () => {
+            const env = setupPauseSpy();
+            AppState.isPlaying = true;
+            AppState.countInActive = true;
+            try {
+                window.PTTransport.pausePlaybackFromToolbar();
+                assert.eq(AppState.isPlaying, false);
+                assert.eq(AppState.countInActive, false);
+                assert.eq(env.pauseCalls(), 1, 'shouldTone.Transport.pause()');
+                assert.eq(env.stopCalls(), 0, 'should NOT call Tone.Transport.stop()');
+            } finally { env.restore(); }
+        });
+    });
+
+    group('PTTransport.stopPlaybackState', () => {
+        function stubAll() {
+            const stubs = {
+                Tone: window.Tone,
+                clearScheduledMetronomeEvents: window.clearScheduledMetronomeEvents,
+                stopWaitModeMetronome: window.stopWaitModeMetronome,
+                silencePlaybackOutputsImmediately: window.silencePlaybackOutputsImmediately,
+                clearTempoVisualPulse: window.clearTempoVisualPulse,
+                applyToneLatencyProfileForMode: window.applyToneLatencyProfileForMode,
+                wipeHardwareLEDs: window.wipeHardwareLEDs,
+                updatePlayPauseButton: window.PTTransport.updatePlayPauseButton
+            };
+            let pauseCalls = 0, stopCalls = 0;
+            window.Tone = { Transport: { pause: () => { pauseCalls++; }, stop: () => { stopCalls++; } } };
+            window.clearScheduledMetronomeEvents = () => {};
+            window.stopWaitModeMetronome = () => {};
+            window.silencePlaybackOutputsImmediately = () => {};
+            window.clearTempoVisualPulse = () => {};
+            window.applyToneLatencyProfileForMode = () => {};
+            window.wipeHardwareLEDs = () => {};
+            return {
+                pauseCalls: () => pauseCalls,
+                stopCalls: () => stopCalls,
+                restore: () => {
+                    for (const [name, original] of Object.entries(stubs)) window[name] = original;
+                }
+            };
+        }
+
+        test('clears led preview state when stopping', () => {
+            const env = stubAll();
+            AppState.isPlaying = true;
+            AppState.lastLedPreviewEvents = [1, 2];
+            AppState.ledPreviewTraversalIndex = 9;
+            try {
+                window.PTTransport.stopPlaybackState();
+                assert.eq(AppState.lastLedPreviewEvents.length, 0);
+                assert.eq(AppState.ledPreviewTraversalIndex, -1);
+                assert.eq(env.pauseCalls(), 1);
+                assert.eq(env.stopCalls(), 0);
+            } finally { env.restore(); }
+        });
+
+        test('uses stop() instead of pause() when pauseTransport: false', () => {
+            const env = stubAll();
+            try {
+                window.PTTransport.stopPlaybackState({ pauseTransport: false });
+                assert.eq(env.pauseCalls(), 0);
+                assert.eq(env.stopCalls(), 1);
+            } finally { env.restore(); }
+        });
+    });
+
+    group('PTTransport.resetPlaybackForLoadedScore', () => {
+        function setupResetSpy() {
+            const stubs = {
+                Tone: window.Tone,
+                clearScheduledMetronomeEvents: window.clearScheduledMetronomeEvents,
+                stopWaitModeMetronome: window.stopWaitModeMetronome,
+                silencePlaybackOutputsImmediately: window.silencePlaybackOutputsImmediately,
+                clearTempoVisualPulse: window.clearTempoVisualPulse,
+                applyToneLatencyProfileForMode: window.applyToneLatencyProfileForMode,
+                wipeHardwareLEDs: window.wipeHardwareLEDs,
+                updatePlayPauseButton: window.PTTransport.updatePlayPauseButton,
+                clearVisuals: window.clearVisuals,
+                updateScoreDisplay: window.updateScoreDisplay
+            };
+            let stopCalls = 0, pauseCalls = 0;
+            let svgFeedbackCalls = 0, clearVisualsCalls = 0;
+            window.Tone = { Transport: { pause: () => { pauseCalls++; }, stop: () => { stopCalls++; } } };
+            window.clearScheduledMetronomeEvents = () => {};
+            window.stopWaitModeMetronome = () => {};
+            window.silencePlaybackOutputsImmediately = () => {};
+            window.clearTempoVisualPulse = () => {};
+            window.applyToneLatencyProfileForMode = () => {};
+            window.wipeHardwareLEDs = () => {};
+            window.clearVisuals = () => { clearVisualsCalls++; };
+            window.updateScoreDisplay = () => {};
+            window.GeometryEngine.clearSvgFeedback = () => { svgFeedbackCalls++; };
+            return {
+                stopCalls: () => stopCalls,
+                pauseCalls: () => pauseCalls,
+                svgFeedbackCalls: () => svgFeedbackCalls,
+                clearVisualsCalls: () => clearVisualsCalls,
+                restore: () => {
+                    for (const [name, original] of Object.entries(stubs)) window[name] = original;
+                }
+            };
+        }
+
+        test('resets scores and calls Tone.Transport.stop()', () => {
+            const env = setupResetSpy();
+            AppState.scoreNoteLabels = [1];
+            AppState.score.correct = 7;
+            AppState.score.wrong = 3;
+            try {
+                window.PTTransport.resetPlaybackForLoadedScore();
+                assert.eq(AppState.scoreNoteLabels.length, 0);
+                assert.eq(AppState.score.correct, 0);
+                assert.eq(AppState.score.wrong, 0);
+                assert.eq(env.stopCalls(), 1, 'should call Tone.Transport.stop()');
+                assert.eq(env.pauseCalls(), 0, 'should NOT call Tone.Transport.pause()');
+                assert.eq(env.svgFeedbackCalls(), 1);
+                assert.eq(env.clearVisualsCalls(), 1);
+            } finally { env.restore(); }
+        });
+    });
+
+    // ---- looper-state.js ----
+    group('PTLooperState.getInitialLooperBounds', () => {
+        test('returns min=1, max=totalMeasures', () => {
+            assert.deepEq(window.PTLooperState.getInitialLooperBounds(48), { min: 1, max: 48 });
+        });
+
+        test('clamps non-finite totals to 1', () => {
+            assert.deepEq(window.PTLooperState.getInitialLooperBounds(0), { min: 1, max: 1 });
+            assert.deepEq(window.PTLooperState.getInitialLooperBounds(null), { min: 1, max: 1 });
+            assert.deepEq(window.PTLooperState.getInitialLooperBounds('bad'), { min: 1, max: 1 });
+        });
+    });
+
+    group('PTLooperState.normalizeLooperBounds', () => {
+        test('passes through valid min/max', () => {
+            assert.deepEq(window.PTLooperState.normalizeLooperBounds({ minVal: 5, maxVal: 20, maxAllowed: 100 }), { min: 5, max: 20 });
+        });
+
+        test('clamps negatives and NaN to 1', () => {
+            assert.deepEq(window.PTLooperState.normalizeLooperBounds({ minVal: -5, maxVal: 10, maxAllowed: 100 }), { min: 1, max: 10 });
+            assert.deepEq(window.PTLooperState.normalizeLooperBounds({ minVal: 'abc', maxVal: 10, maxAllowed: 100 }), { min: 1, max: 10 });
+        });
+
+        test('clamps above maxAllowed', () => {
+            assert.deepEq(window.PTLooperState.normalizeLooperBounds({ minVal: 1, maxVal: 200, maxAllowed: 50 }), { min: 1, max: 50 });
+            assert.deepEq(window.PTLooperState.normalizeLooperBounds({ minVal: 999, maxVal: 5, maxAllowed: 50 }), { min: 50, max: 50 }, 'snaps when clamp leaves min > max');
+        });
+
+        test('snaps min down to max when min input changed and min > max', () => {
+            const r = window.PTLooperState.normalizeLooperBounds({ minVal: 30, maxVal: 10, maxAllowed: 100, changedId: 'val-loop-min' });
+            assert.eq(r.min, 30);
+            assert.eq(r.max, 30);
+        });
+
+        test('snaps max up to min when max input changed and min > max', () => {
+            const r = window.PTLooperState.normalizeLooperBounds({ minVal: 30, maxVal: 10, maxAllowed: 100, changedId: 'val-loop-max' });
+            assert.eq(r.min, 10);
+            assert.eq(r.max, 10);
+        });
+    });
+
+    group('PTLooperState.isMeasureInLooperBounds', () => {
+        test('returns true for measure inside range', () => {
+            assert.ok(window.PTLooperState.isMeasureInLooperBounds(4, 2, 10));
+        });
+
+        test('returns false for measure outside range', () => {
+            assert.ok(!window.PTLooperState.isMeasureInLooperBounds(0, 2, 10));
+            assert.ok(!window.PTLooperState.isMeasureInLooperBounds(15, 2, 10));
+        });
+
+        test('treats bounds as inclusive on both ends', () => {
+            assert.ok(window.PTLooperState.isMeasureInLooperBounds(1, 2, 10), 'measureIdx 1 == looperMin 2 means 0-indexed measure 1 = measure 2');
+            assert.ok(window.PTLooperState.isMeasureInLooperBounds(9, 2, 10), 'last measure in range');
+        });
+
+        test('returns false for inverted bounds', () => {
+            assert.ok(!window.PTLooperState.isMeasureInLooperBounds(5, 10, 2));
+        });
+
+        test('returns false for non-finite input', () => {
+            assert.ok(!window.PTLooperState.isMeasureInLooperBounds('x', 1, 10));
+            assert.ok(!window.PTLooperState.isMeasureInLooperBounds(5, null, 10));
+            assert.ok(!window.PTLooperState.isMeasureInLooperBounds(5, 1, undefined));
+        });
+    });
+
+    group('PTLooperState.getNextLooperStep', () => {
+        test('uses parsed currentValue when finite', () => {
+            assert.eq(window.PTLooperState.getNextLooperStep('7', 1, 1), 8);
+            assert.eq(window.PTLooperState.getNextLooperStep('7', -1, 1), 6);
+        });
+
+        test('falls back to fallbackValue when currentValue is NaN', () => {
+            assert.eq(window.PTLooperState.getNextLooperStep('', 1, 5), 6);
+            assert.eq(window.PTLooperState.getNextLooperStep('abc', -1, 10), 9);
+        });
+
+        test('falls back to 1 when both currentValue and fallbackValue are NaN', () => {
+            assert.eq(window.PTLooperState.getNextLooperStep('', 1, 'bad'), 2);
+        });
+    });
+
+    // ---- MxlParser (path normalization, depth, ZIP listing, full extraction) ----
+    group('MxlParser internals', () => {
+        test('normalizeZipEntryPath strips leading slashes and backslashes', () => {
+            const n = window.MxlParser._internals.normalizeZipEntryPath;
+            assert.eq(n('foo/bar'), 'foo/bar');
+            assert.eq(n('/foo/bar'), 'foo/bar');
+            assert.eq(n('\\\\foo\\\\bar'), 'foo/bar');
+            assert.eq(n(''), '');
+            assert.eq(n(null), '');
+        });
+
+        test('getZipEntryDepth counts path segments', () => {
+            const d = window.MxlParser._internals.getZipEntryDepth;
+            assert.eq(d('root.xml'), 0);
+            assert.eq(d('a/b.xml'), 1);
+            assert.eq(d('a/b/c.xml'), 2);
+            assert.eq(d(''), Number.MAX_SAFE_INTEGER);
+        });
+
+        test('listZipEntries rejects non-ZIP input', () => {
+            const l = window.MxlParser._internals.listZipEntries;
+            const ab = new TextEncoder().encode('not a zip').buffer;
+            assert.throws(() => l(ab), /ZIP directory/);
+        });
+
+        test('listZipEntries reads stored (uncompressed) entries', () => {
+            const ab = buildZip([{ name: 'score.xml', data: new TextEncoder().encode('<score/>'), method: 0 }]);
+            const entries = window.MxlParser._internals.listZipEntries(ab);
+            assert.eq(entries.length, 1);
+            assert.eq(entries[0].fileName, 'score.xml');
+            assert.eq(entries[0].compressionMethod, 0);
+            assert.eq(entries[0].compressedSize, 8);
+            assert.eq(entries[0].uncompressedSize, 8);
+        });
+
+        test('chooseMusicXmlEntry prefers container.xml path', () => {
+            const c = window.MxlParser._internals.chooseMusicXmlEntry;
+            const entries = [
+                { fileName: 'meta-inf/container.xml' },
+                { fileName: 'scores/alt.xml' },
+                { fileName: 'scores/main.xml' }
+            ];
+            const picked = c(entries, 'scores/main.xml');
+            assert.eq(picked.fileName, 'scores/main.xml');
+        });
+
+        test('chooseMusicXmlEntry falls back to root-level XML', () => {
+            const c = window.MxlParser._internals.chooseMusicXmlEntry;
+            const entries = [
+                { fileName: 'a/b.xml' },
+                { fileName: 'root.xml' },
+                { fileName: 'c.xml' }
+            ];
+            const picked = c(entries);
+            assert.eq(picked.fileName, 'c.xml', 'root-level XML, alphabetical');
+        });
+
+        test('chooseMusicXmlEntry returns null when no XML entries', () => {
+            const c = window.MxlParser._internals.chooseMusicXmlEntry;
+            assert.eq(c([{ fileName: 'readme.txt' }]), null);
+        });
+    });
+
+    group('MxlParser.extractMusicXml', () => {
+        test('returns null for unsupported rawData types', () => {
+            return window.MxlParser.extractMusicXml(null).then(result => assert.eq(result, null));
+        });
+
+        test('extracts stored MusicXML from a minimal MXL', () => {
+            const xml = '<score-partwise version="3.1"><part-list/><part id="P1"><measure number="1"><note><pitch><step>C</step><octave>4</octave></pitch></note></measure></part></score-partwise>';
+            const ab = buildZip([{ name: 'score.xml', data: new TextEncoder().encode(xml), method: 0 }]);
+            return window.MxlParser.extractMusicXml(ab).then(text => assert.eq(text, xml));
+        });
+
+        test('honors META-INF/container.xml full-path', () => {
+            const xml = '<score/>';
+            const container = '<?xml version="1.0"?><container><rootfiles><rootfile full-path="scores/main.xml"/></rootfiles></container>';
+            const ab = buildZip([
+                { name: 'META-INF/container.xml', data: new TextEncoder().encode(container), method: 0 },
+                { name: 'scores/alt.xml', data: new TextEncoder().encode('<alt/>'), method: 0 },
+                { name: 'scores/main.xml', data: new TextEncoder().encode(xml), method: 0 }
+            ]);
+            return window.MxlParser.extractMusicXml(ab).then(text => assert.eq(text, xml));
+        });
+
+        test('throws when no MusicXML entry is present', () => {
+            const ab = buildZip([{ name: 'readme.txt', data: new TextEncoder().encode('hi'), method: 0 }]);
+            return window.MxlParser.extractMusicXml(ab).then(
+                () => { throw new Error('should have thrown'); },
+                err => assert.ok(/MusicXML/.test(err.message))
+            );
+        });
+    });
+
+    // ---- transpose-engine.js ----
+    group('TransposeEngine.isXmlString', () => {
+        test('accepts score-partwise', () => {
+            assert.ok(window.TransposeEngine.isXmlString('<score-partwise>foo</score-partwise>'));
+        });
+        test('accepts score-timewise', () => {
+            assert.ok(window.TransposeEngine.isXmlString('<score-timewise>foo</score-timewise>'));
+        });
+        test('rejects empty / non-XML', () => {
+            assert.ok(!window.TransposeEngine.isXmlString(''));
+            assert.ok(!window.TransposeEngine.isXmlString(null));
+            assert.ok(!window.TransposeEngine.isXmlString('hello'));
+        });
+    });
+
+    group('TransposeEngine.detectScoreKey', () => {
+        function wrapScore(inner) {
+            return '<?xml version="1.0" encoding="UTF-8"?>\n<score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list><part id="P1">' + inner + '</part></score-partwise>';
+        }
+
+        test('reads major key fifths', () => {
+            const xml = window.TransposeEngine.parseXml(wrapScore('<measure number="1"><attributes><key><fifths>2</fifths><mode>major</mode></key></attributes></measure>'));
+            const k = window.TransposeEngine.detectScoreKey(xml);
+            assert.eq(k.fifths, 2);
+            assert.eq(k.tonic, 2);
+            assert.eq(k.mode, 'major');
+            assert.eq(k.label, 'D major / B minor');
+            assert.eq(k.bias, 'sharp');
+        });
+
+        test('reads minor key fifths (Bb minor = -5)', () => {
+            const xml = window.TransposeEngine.parseXml(wrapScore('<measure number="1"><attributes><key><fifths>-5</fifths><mode>minor</mode></key></attributes></measure>'));
+            const k = window.TransposeEngine.detectScoreKey(xml);
+            assert.eq(k.fifths, -5);
+            assert.eq(k.tonic, 10);
+            assert.eq(k.mode, 'minor');
+            assert.eq(k.bias, 'flat');
+        });
+
+        test('missing key returns found=false', () => {
+            const xml = window.TransposeEngine.parseXml(wrapScore('<measure number="1"><attributes/></measure>'));
+            const k = window.TransposeEngine.detectScoreKey(xml);
+            assert.eq(k.found, false);
+            assert.eq(k.tonic, null);
+        });
+    });
+
+    group('TransposeEngine.getKeyPresets', () => {
+        test('exposes 15 presets from -7 to +7', () => {
+            const presets = window.TransposeEngine.getKeyPresets();
+            assert.eq(presets.length, 15);
+            assert.eq(presets[0].fifths, -7);
+            assert.eq(presets[14].fifths, 7);
+        });
+        test('presets can be looked up by value', () => {
+            const p = window.TransposeEngine.getPresetByValue('sig-2');
+            assert.ok(p && p.fifths === 2 && p.tonic === 2);
+            assert.eq(window.TransposeEngine.getPresetByValue('bogus'), null);
+        });
+    });
+
+    group('TransposeEngine.transposeXml', () => {
+        function wrapScore(inner) {
+            return '<?xml version="1.0" encoding="UTF-8"?>\n<score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list><part id="P1">' + inner + '</part></score-partwise>';
+        }
+        function findPitch(xmlString, index = 0) {
+            const doc = window.TransposeEngine.parseXml(xmlString);
+            const pitches = Array.from(doc.querySelectorAll('pitch'));
+            const p = pitches[index];
+            if (!p) return null;
+            const step = p.querySelector('step').textContent;
+            const octave = p.querySelector('octave').textContent;
+            const alter = p.querySelector('alter')?.textContent || '0';
+            return { step, octave, alter };
+        }
+
+        test('rejects non-XML', () => {
+            assert.throws(() => window.TransposeEngine.transposeXml('not xml', { semitones: 2 }));
+        });
+
+        test('+1 semitone: C→C#, F→F# (sharp bias)', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>major</mode></key></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note><note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: 1 });
+            assert.near(out.semitoneDelta, 1, 1e-9);
+            const p0 = findPitch(out.xmlString, 0);
+            const p1 = findPitch(out.xmlString, 1);
+            assert.eq(p0.step, 'C');
+            assert.eq(p0.alter, '1');
+            assert.eq(p1.step, 'F');
+            assert.eq(p1.alter, '1');
+        });
+
+        test('+1 semitone under flat bias: B→C, Bb→B, E→F', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>-1</fifths><mode>major</mode></key></attributes><note><pitch><step>B</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note><note><pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note><note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: 1 });
+            const p0 = findPitch(out.xmlString, 0);
+            const p1 = findPitch(out.xmlString, 1);
+            const p2 = findPitch(out.xmlString, 2);
+            assert.eq(p0.step, 'C');
+            assert.eq(p0.alter, '0');
+            assert.eq(p1.step, 'B');
+            assert.eq(p1.alter, '0');
+            assert.eq(p2.step, 'F');
+            assert.eq(p2.alter, '0');
+        });
+
+        test('-2 semitones: D→C, Bb→Ab', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>-2</fifths><mode>major</mode></key></attributes><note><pitch><step>D</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note><note><pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: -2 });
+            const p0 = findPitch(out.xmlString, 0);
+            const p1 = findPitch(out.xmlString, 1);
+            assert.eq(p0.step, 'C');
+            assert.eq(p1.step, 'A');
+            assert.eq(p1.alter, '-1');
+        });
+
+        test('+12 semitones: same spelling, octaves bump', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>major</mode></key></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: 12 });
+            const p = findPitch(out.xmlString, 0);
+            assert.eq(p.step, 'C');
+            assert.eq(p.alter, '0');
+            assert.eq(p.octave, '5');
+        });
+
+        test('0 semitones short-circuits', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>major</mode></key></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: 0 });
+            assert.eq(out.semitoneDelta, 0);
+            assert.eq(out.xmlString, xml);
+        });
+
+        test('key mode: C major → G major (+7 fifths)', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>major</mode></key></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { mode: 'key', targetKey: 'sig-1' });
+            const doc = window.TransposeEngine.parseXml(out.xmlString);
+            const fifths = doc.querySelector('fifths').textContent;
+            assert.eq(Number(fifths), 1);
+            assert.eq(out.targetKeyLabel, 'G major / E minor');
+        });
+
+        test('key mode: A minor → C minor (-3 fifths)', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>minor</mode></key></attributes><note><pitch><step>A</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { mode: 'key', targetKey: 'sig--3' });
+            const doc = window.TransposeEngine.parseXml(out.xmlString);
+            const fifths = doc.querySelector('fifths').textContent;
+            assert.eq(Number(fifths), -3);
+        });
+
+        test('harmony root+bass both transpose', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>major</mode></key></attributes><harmony><root><root-step>C</root-step></root><bass><bass-step>E</bass-step></bass></harmony></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: 4 });
+            const doc = window.TransposeEngine.parseXml(out.xmlString);
+            const rootStep = doc.querySelector('root-step').textContent;
+            const bassStep = doc.querySelector('bass-step').textContent;
+            assert.eq(rootStep, 'E');
+            assert.eq(bassStep, 'G');
+        });
+
+        test('octave wrap on B → C natural upward', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>major</mode></key></attributes><note><pitch><step>B</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: 1 });
+            const p = findPitch(out.xmlString, 0);
+            assert.eq(p.step, 'C');
+            assert.eq(p.alter, '0');
+            assert.eq(p.octave, '5');
+        });
+
+        test('Bb → B natural (no alter)', () => {
+            const xml = wrapScore('<measure number="1"><attributes><key><fifths>0</fifths><mode>major</mode></key></attributes><note><pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>');
+            const out = window.TransposeEngine.transposeXml(xml, { semitones: 1 });
+            const p = findPitch(out.xmlString, 0);
+            assert.eq(p.step, 'B');
+            assert.eq(p.alter, '0');
+            assert.eq(p.octave, '4');
+        });
+    });
+
+    // ---- PTKeyboardInput (createKeyboardInput factory) ----
+    // The factory is exercised end-to-end with mocked deps; resolveLiveVelocity
+    // is tested directly. AppState reads/writes go through a small per-test stub.
+    group('PTKeyboardInput', () => {
+        function makeAppStateStub(overrides = {}) {
+            const base = {
+                inputVelocityEnabled: true,
+                ledCalibrationMode: false,
+                isPlaying: false,
+                mode: 'wait',
+                practice: { left: false, right: false },
+                realtimeWrongPressInCurrentContext: false,
+                pressedKeys: new Set(),
+                heldCorrectNotes: new Map(),
+                preExpectedHeldNotes: new Map(),
+                earlyGraceReservations: new Map(),
+                expectedNotes: [],
+                score: { correct: 0, wrong: 0 },
+                liveLowLatencyMonitoringEnabled: false
+            };
+            Object.assign(base, overrides);
+            return base;
+        }
+
+        function makeDeps(overrides = {}) {
+            return Object.assign({
+                playLocalPianoNote: () => {},
+                pianoSampler: { triggerRelease: () => {} },
+                getSamplerNoteName: () => 'C4',
+                getLiveAudioTime: () => 0,
+                sendMidiOutNoteOn: () => {},
+                sendMidiOutNoteOff: () => {},
+                normalizeLiveVelocity: (v) => ({ midi: v }),
+                getLiveMonitoringVelocity: (_src, v) => v,
+                selectLedCalibrationMidi: () => {},
+                findExpectedMatchForMidi: () => null,
+                findSatisfiedOrSustainedMatchForMidi: () => null,
+                tryReserveSingleHandEarlyGrace: () => null,
+                tryReserveRealtimeUpcomingHeldNote: () => null,
+                drawFeedbackNote: () => {},
+                updateScoreDisplay: () => {},
+                registerHeldIncorrectFeedback: () => {},
+                releaseHeldIncorrectFeedback: () => {},
+                checkWaitModeAdvance: () => {},
+                debugLogEvent: () => {},
+                ensureLiveAudioReady: () => Promise.resolve(),
+                isAudioContextReady: () => true
+            }, overrides);
+        }
+
+        function saveRestoreAppState(fn) {
+            const prev = window.AppState;
+            return Promise.resolve().then(() => {
+                window.AppState = makeAppStateStub();
+                try { fn(); } finally { window.AppState = prev; }
+            });
+        }
+
+        test('resolveLiveVelocity: midi + enabled → honors velocity', () => {
+            assert.eq(window.PTKeyboardInput.resolveLiveVelocity('midi', 77, true), 77);
+        });
+        test('resolveLiveVelocity: midi + disabled → 100', () => {
+            assert.eq(window.PTKeyboardInput.resolveLiveVelocity('midi', 77, false), 100);
+        });
+        test('resolveLiveVelocity: ui always → 100 regardless of velocity/enabled', () => {
+            assert.eq(window.PTKeyboardInput.resolveLiveVelocity('ui', 77, true), 100);
+            assert.eq(window.PTKeyboardInput.resolveLiveVelocity('ui', 77, false), 100);
+        });
+
+        function captureDeps() {
+            const calls = [];
+            const deps = makeDeps({
+                playLocalPianoNote: (...a) => calls.push(['playLocalPianoNote', ...a]),
+                sendMidiOutNoteOn: (...a) => calls.push(['sendMidiOutNoteOn', ...a]),
+                sendMidiOutNoteOff: (...a) => calls.push(['sendMidiOutNoteOff', ...a]),
+                selectLedCalibrationMidi: (...a) => calls.push(['selectLedCalibrationMidi', ...a]),
+                drawFeedbackNote: (...a) => calls.push(['drawFeedbackNote', ...a]),
+                registerHeldIncorrectFeedback: (...a) => calls.push(['registerHeldIncorrectFeedback', ...a]),
+                releaseHeldIncorrectFeedback: (...a) => calls.push(['releaseHeldIncorrectFeedback', ...a]),
+                checkWaitModeAdvance: (...a) => calls.push(['checkWaitModeAdvance', ...a])
+            });
+            return { calls, deps };
+        }
+
+        test('press: not playing + no calibration → routes audio + midi out + adds to pressedKeys', () => {
+            return saveRestoreAppState(() => {
+                const { calls, deps } = captureDeps();
+                const fire = window.PTKeyboardInput.createKeyboardInput(deps);
+                // stub PTMidiRouting to allow both routes
+                const prevRouting = window.PTMidiRouting;
+                window.PTMidiRouting = {
+                    shouldRouteLiveSourceToLocalAudio: () => true,
+                    shouldRouteLiveSourceToMidiOut: () => true
+                };
+                const prevVK = window.PTVirtualKeyboard;
+                let renderCount = 0;
+                window.PTVirtualKeyboard = { renderVirtualKeyboard: () => renderCount++ };
+                try {
+                    fire(60, true, 'midi', 80);
+                } finally {
+                    window.PTMidiRouting = prevRouting;
+                    window.PTVirtualKeyboard = prevVK;
+                }
+                assert.ok(calls.some(c => c[0] === 'playLocalPianoNote' && c[1] === 60 && c[2] === 80), 'playLocalPianoNote called with midi + velocity');
+                assert.ok(calls.some(c => c[0] === 'sendMidiOutNoteOn' && c[1] === 60), 'sendMidiOutNoteOn called with midi');
+                assert.ok(window.AppState.pressedKeys.has(60), 'pressedKeys contains midi');
+                assert.eq(renderCount, 1, 'renderVirtualKeyboard called once');
+            });
+        });
+
+        test('press: ui source uses fixed velocity 100 regardless of inputVelocityEnabled', () => {
+            return saveRestoreAppState(() => {
+                const { calls, deps } = captureDeps();
+                const fire = window.PTKeyboardInput.createKeyboardInput(deps);
+                const prevRouting = window.PTMidiRouting;
+                window.PTMidiRouting = {
+                    shouldRouteLiveSourceToLocalAudio: () => true,
+                    shouldRouteLiveSourceToMidiOut: () => false
+                };
+                const prevVK = window.PTVirtualKeyboard;
+                window.PTVirtualKeyboard = { renderVirtualKeyboard: () => {} };
+                try {
+                    fire(60, true, 'ui', 50);
+                } finally {
+                    window.PTMidiRouting = prevRouting;
+                    window.PTVirtualKeyboard = prevVK;
+                }
+                const playCall = calls.find(c => c[0] === 'playLocalPianoNote');
+                assert.ok(playCall, 'playLocalPianoNote called');
+                assert.eq(playCall[2], 100, 'ui forces velocity to 100 even when caller passed 50');
+                assert.ok(playCall[4] && playCall[4].lowLatencyLive === true, 'ui source sets lowLatencyLive true');
+            });
+        });
+
+        test('press: ledCalibrationMode short-circuits → selectLedCalibrationMidi + render, no audio deps', () => {
+            return saveRestoreAppState(() => {
+                const { calls, deps } = captureDeps();
+                const fire = window.PTKeyboardInput.createKeyboardInput(deps);
+                const prevApp = window.AppState;
+                window.AppState = makeAppStateStub({ ledCalibrationMode: true });
+                const prevRouting = window.PTMidiRouting;
+                window.PTMidiRouting = {
+                    shouldRouteLiveSourceToLocalAudio: () => true,
+                    shouldRouteLiveSourceToMidiOut: () => true
+                };
+                const prevVK = window.PTVirtualKeyboard;
+                let renderCount = 0;
+                window.PTVirtualKeyboard = { renderVirtualKeyboard: () => renderCount++ };
+                try {
+                    fire(60, true, 'midi', 80);
+                } finally {
+                    window.AppState = prevApp;
+                    window.PTMidiRouting = prevRouting;
+                    window.PTVirtualKeyboard = prevVK;
+                }
+                assert.ok(calls.some(c => c[0] === 'selectLedCalibrationMidi' && c[1] === 60), 'selectLedCalibrationMidi called');
+                assert.ok(!calls.some(c => c[0] === 'playLocalPianoNote'), 'no audio fired in calibration mode');
+                assert.ok(!calls.some(c => c[0] === 'sendMidiOutNoteOn'), 'no midi out fired in calibration mode');
+                assert.eq(renderCount, 1, 'renderVirtualKeyboard called');
+            });
+        });
+
+        test('press: playing + correct match → drawFeedbackNote + score++ + checkWaitModeAdvance', () => {
+            return saveRestoreAppState(() => {
+                const { calls, deps } = captureDeps();
+                const match = { staffId: 'rh', mIdx: 0, anchor: { x: 1, y: 2 }, hit: false };
+                const depOverrides = {
+                    findExpectedMatchForMidi: () => match,
+                    drawFeedbackNote: (...a) => calls.push(['drawFeedbackNote', ...a]),
+                    updateScoreDisplay: () => calls.push(['updateScoreDisplay']),
+                    checkWaitModeAdvance: (...a) => calls.push(['checkWaitModeAdvance', ...a])
+                };
+                const fire = window.PTKeyboardInput.createKeyboardInput({ ...deps, ...depOverrides });
+                const prevApp = window.AppState;
+                window.AppState = makeAppStateStub({ isPlaying: true, mode: 'wait', practice: { left: false, right: true } });
+                const prevRouting = window.PTMidiRouting;
+                window.PTMidiRouting = {
+                    shouldRouteLiveSourceToLocalAudio: () => false,
+                    shouldRouteLiveSourceToMidiOut: () => false
+                };
+                const prevVK = window.PTVirtualKeyboard;
+                window.PTVirtualKeyboard = { renderVirtualKeyboard: () => {} };
+                try {
+                    fire(60, true, 'midi', 80);
+                } finally {
+                    window.AppState = prevApp;
+                    window.PTMidiRouting = prevRouting;
+                    window.PTVirtualKeyboard = prevVK;
+                }
+                assert.ok(calls.some(c => c[0] === 'drawFeedbackNote'), 'drawFeedbackNote called');
+                assert.eq(window.AppState.score.correct, 1, 'score.correct incremented');
+                assert.ok(window.AppState.heldCorrectNotes.has(60), 'heldCorrectNotes set');
+                assert.eq(match.hit, true, 'expectedMatch.hit = true');
+                assert.ok(calls.some(c => c[0] === 'checkWaitModeAdvance'), 'checkWaitModeAdvance called for wait mode');
+            });
+        });
+
+        test('press: playing + no match + realtime mode → wrong++ + realtimeWrongPressInCurrentContext flag', () => {
+            return saveRestoreAppState(() => {
+                const { calls, deps } = captureDeps();
+                const depOverrides = {
+                    registerHeldIncorrectFeedback: (...a) => calls.push(['registerHeldIncorrectFeedback', ...a]),
+                    updateScoreDisplay: () => calls.push(['updateScoreDisplay'])
+                };
+                const fire = window.PTKeyboardInput.createKeyboardInput({ ...deps, ...depOverrides });
+                const prevApp = window.AppState;
+                window.AppState = makeAppStateStub({ isPlaying: true, mode: 'realtime', practice: { left: false, right: true } });
+                const prevRouting = window.PTMidiRouting;
+                window.PTMidiRouting = {
+                    shouldRouteLiveSourceToLocalAudio: () => false,
+                    shouldRouteLiveSourceToMidiOut: () => false
+                };
+                const prevVK = window.PTVirtualKeyboard;
+                window.PTVirtualKeyboard = { renderVirtualKeyboard: () => {} };
+                try {
+                    fire(60, true, 'midi', 80);
+                } finally {
+                    window.AppState = prevApp;
+                    window.PTMidiRouting = prevRouting;
+                    window.PTVirtualKeyboard = prevVK;
+                }
+                assert.ok(calls.some(c => c[0] === 'registerHeldIncorrectFeedback'), 'registerHeldIncorrectFeedback called');
+                assert.eq(window.AppState.score.wrong, 1, 'score.wrong incremented');
+                assert.eq(window.AppState.realtimeWrongPressInCurrentContext, true, 'realtime flag set');
+            });
+        });
+
+        test('release: deletes from pressedKeys + heldCorrectNotes + triggers release', () => {
+            return saveRestoreAppState(() => {
+                const { calls, deps } = captureDeps();
+                const fire = window.PTKeyboardInput.createKeyboardInput(deps);
+                const prevApp = window.AppState;
+                const state = makeAppStateStub();
+                state.pressedKeys.add(60);
+                state.heldCorrectNotes.set(60, 'rh');
+                state.preExpectedHeldNotes.set(60, 'rh');
+                window.AppState = state;
+                const prevRouting = window.PTMidiRouting;
+                window.PTMidiRouting = {
+                    shouldRouteLiveSourceToLocalAudio: () => true,
+                    shouldRouteLiveSourceToMidiOut: () => true
+                };
+                const prevVK = window.PTVirtualKeyboard;
+                let renderCount = 0;
+                window.PTVirtualKeyboard = { renderVirtualKeyboard: () => renderCount++ };
+                try {
+                    fire(60, false, 'midi', 80);
+                } finally {
+                    window.AppState = prevApp;
+                    window.PTMidiRouting = prevRouting;
+                    window.PTVirtualKeyboard = prevVK;
+                }
+                assert.ok(!window.AppState.pressedKeys.has(60), 'pressedKeys removed');
+                assert.ok(!window.AppState.heldCorrectNotes.has(60), 'heldCorrectNotes removed');
+                assert.ok(!window.AppState.preExpectedHeldNotes.has(60), 'preExpectedHeldNotes removed');
+                assert.ok(calls.some(c => c[0] === 'releaseHeldIncorrectFeedback'), 'releaseHeldIncorrectFeedback called');
+                assert.ok(calls.some(c => c[0] === 'sendMidiOutNoteOff'), 'sendMidiOutNoteOff called');
+                assert.eq(renderCount, 1, 'renderVirtualKeyboard called');
+            });
+        });
+
+        test('release: allowTapCarry reservation is preserved across release', () => {
+            return saveRestoreAppState(() => {
+                const fire = window.PTKeyboardInput.createKeyboardInput(makeDeps());
+                const prevApp = window.AppState;
+                const state = makeAppStateStub();
+                state.earlyGraceReservations.set(60, { allowTapCarry: true });
+                window.AppState = state;
+                const prevRouting = window.PTMidiRouting;
+                window.PTMidiRouting = {
+                    shouldRouteLiveSourceToLocalAudio: () => false,
+                    shouldRouteLiveSourceToMidiOut: () => false
+                };
+                const prevVK = window.PTVirtualKeyboard;
+                window.PTVirtualKeyboard = { renderVirtualKeyboard: () => {} };
+                try {
+                    fire(60, false, 'ui');
+                } finally {
+                    window.AppState = prevApp;
+                    window.PTMidiRouting = prevRouting;
+                    window.PTVirtualKeyboard = prevVK;
+                }
+                assert.ok(window.AppState.earlyGraceReservations.has(60), 'allowTapCarry reservation preserved');
+            });
+        });
+    });
+
+    // ---- OSMD integration (dotted, ties, chord, cue, repeats, endings) ----
+    const __osmdTests = [];
+
+    function wrapFullScore(inner) {
+        return '<?xml version="1.0" encoding="UTF-8"?>\n<score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list><part id="P1">' + inner + '</part></score-partwise>';
+    }
+
+    // Minimal ZIP archive builder for MXL parser tests. Supports stored (method 0)
+// entries only. Enough to exercise listZipEntries, extractZipEntryText, and the
+// full extractMusicXml flow without depending on external files.
+// CRC_TABLE + crc32 are defined at the top of runTests so sync test() calls can reach them.
+
+    function buildZip(files) {
+        const enc = new TextEncoder();
+        const localChunks = [];
+        const centralChunks = [];
+        let offset = 0;
+
+        for (const file of files) {
+            const nameBytes = enc.encode(file.name);
+            const data = file.method === 0 ? file.data : file.data; // deflate tested via CompressionStream
+            const compressed = file.method === 0 ? data : null; // produced below when needed
+            const crc = crc32(data);
+
+            const localHeader = new Uint8Array(30 + nameBytes.length);
+            const lv = new DataView(localHeader.buffer);
+            lv.setUint32(0, 0x04034b50, true);
+            lv.setUint16(4, 20, true);
+            lv.setUint16(6, 0, true);
+            lv.setUint16(8, file.method, true);
+            lv.setUint16(10, 0, true);
+            lv.setUint16(12, 0, true);
+            lv.setUint32(14, crc, true);
+            lv.setUint32(18, file.method === 0 ? data.length : 0, true);
+            lv.setUint32(22, data.length, true);
+            lv.setUint16(26, nameBytes.length, true);
+            lv.setUint16(28, 0, true);
+            localHeader.set(nameBytes, 30);
+            localChunks.push(localHeader, data);
+
+            const centralHeader = new Uint8Array(46 + nameBytes.length);
+            const cv = new DataView(centralHeader.buffer);
+            cv.setUint32(0, 0x02014b50, true);
+            cv.setUint16(4, 20, true);
+            cv.setUint16(6, 20, true);
+            cv.setUint16(8, 0, true);
+            cv.setUint16(10, file.method, true);
+            cv.setUint16(12, 0, true);
+            cv.setUint16(14, 0, true);
+            cv.setUint32(16, crc, true);
+            cv.setUint32(20, file.method === 0 ? data.length : 0, true);
+            cv.setUint32(24, data.length, true);
+            cv.setUint16(28, nameBytes.length, true);
+            cv.setUint16(30, 0, true);
+            cv.setUint16(32, 0, true);
+            cv.setUint16(34, 0, true);
+            cv.setUint16(36, 0, true);
+            cv.setUint32(38, 0, true);
+            cv.setUint32(42, offset, true);
+            centralHeader.set(nameBytes, 46);
+            centralChunks.push(centralHeader);
+
+            offset += localHeader.length + data.length;
+        }
+
+        const centralDirSize = centralChunks.reduce((s, c) => s + c.length, 0);
+        const centralDirOffset = offset;
+
+        const eocd = new Uint8Array(22);
+        const ev = new DataView(eocd.buffer);
+        ev.setUint32(0, 0x06054b50, true);
+        ev.setUint16(4, 0, true);
+        ev.setUint16(6, 0, true);
+        ev.setUint16(8, files.length, true);
+        ev.setUint16(10, files.length, true);
+        ev.setUint32(12, centralDirSize, true);
+        ev.setUint32(16, centralDirOffset, true);
+        ev.setUint16(20, 0, true);
+
+        const all = [...localChunks, ...centralChunks, eocd];
+        const totalLen = all.reduce((s, c) => s + c.length, 0);
+        const merged = new Uint8Array(totalLen);
+        let p = 0;
+        for (const c of all) { merged.set(c, p); p += c.length; }
+        return merged.buffer;
+    }
+
+    function loadOsmd(xml) {
+        const container = document.getElementById('osmd-test-container');
+        const o = new opensheetmusicdisplay.OpenSheetMusicDisplay(container, { autoResize: false });
+        return o.load(xml).then(() => { o.render(); o.cursor.show(); o.cursor.reset(); return o; });
+    }
+
+    function collectVoiceEntries(osmd) {
+        const out = [];
+        let safety = 0;
+        while (!osmd.cursor.Iterator.EndReached && safety < 2000) {
+            const entries = osmd.cursor.Iterator.CurrentVoiceEntries || [];
+            for (const entry of entries) {
+                for (const note of (entry.Notes || [])) {
+                    out.push({
+                        note, entry,
+                        mIdx: osmd.cursor.Iterator.CurrentMeasureIndex,
+                        timestamp: osmd.cursor.Iterator.currentTimeStamp.RealValue
+                    });
+                }
+            }
+            osmd.cursor.Iterator.moveToNext();
+            safety++;
+        }
+        return out;
+    }
+
+    // Dotted quarter note (quarter + <dot/>). OSMD exposes dots via DotsXml, not via Length.RealValue.
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type><dot/></note>' +
+            '<note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            assert.eq(notes.length, 2, 'two notes expected');
+            assert.near(notes[0].note.Length.RealValue, 0.25, 1e-6, 'dotted quarter base length');
+            assert.near(notes[1].note.Length.RealValue, 0.25, 1e-6, 'plain quarter base length');
+            assert.eq(notes[0].note.DotsXml, 1, 'dotted note has DotsXml=1');
+            assert.eq(notes[1].note.DotsXml, 0, 'plain note has DotsXml=0');
+        });
+    });
+
+    // Tie chain: half tied to half on same pitch should produce tie.Notes with both halves
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type><notations><tied type="start"/></notations></note>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type><notations><tied type="stop"/></notations></note>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            assert.eq(notes.length, 2);
+            assert.ok(notes[0].note.tie, 'first half has tie');
+            assert.ok(notes[1].note.tie, 'second half has tie');
+            const tieNotes0 = notes[0].note.tie.Notes || [];
+            const tieNotes1 = notes[1].note.tie.Notes || [];
+            assert.eq(tieNotes0.length, 2, 'first tie links 2 notes');
+            assert.eq(tieNotes1.length, 2, 'second tie links 2 notes');
+            assert.ok(tieNotes0.includes(notes[0].note), 'first tie includes first note');
+            assert.ok(tieNotes0.includes(notes[1].note), 'first tie includes second note');
+        });
+    });
+
+    // Chord notes share a VoiceEntry and timestamp
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '<note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '<note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            assert.eq(notes.length, 3);
+            assert.eq(notes[0].entry, notes[1].entry, 'chord notes share entry');
+            assert.eq(notes[1].entry, notes[2].entry);
+            assert.near(notes[0].timestamp, notes[1].timestamp, 1e-6);
+            assert.near(notes[0].timestamp, notes[2].timestamp, 1e-6);
+            assert.eq(notes[0].mIdx, notes[1].mIdx);
+        });
+    });
+
+    // Cue note marked isCueNote
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><cue/><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '<note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            assert.eq(notes.length, 2);
+            assert.ok(notes[0].note.isCueNote === true, 'cue note flagged');
+            assert.ok(notes[1].note.isCueNote === false || notes[1].note.isCueNote === undefined, 'plain note not flagged');
+        });
+    });
+
+    // Repeat barlines: end-repeat jumps cursor back; second visit follows
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>2</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>' +
+            '</measure>' +
+            '<measure number="2"><attributes><key><fifths>0</fifths></key><time><beats>2</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>' +
+            '<barline location="right"><repeat direction="backward"/></barline>' +
+            '</measure>' +
+            '<measure number="3"><attributes><key><fifths>0</fifths></key><time><beats>2</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            const mIdxs = [...new Set(notes.map(n => n.mIdx))];
+            assert.ok(mIdxs.includes(0), 'visits measure 1');
+            assert.ok(mIdxs.includes(1), 'visits measure 2');
+            assert.ok(mIdxs.includes(2), 'visits measure 3');
+            const visitCount = notes.filter(n => n.mIdx === 0).length;
+            assert.ok(visitCount >= 2, 'measure 1 visited more than once (repeat)');
+        });
+    });
+
+    // First/second endings (volta): second pass skips ending-1, plays ending-2
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>2</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>' +
+            '</measure>' +
+            '<measure number="2"><attributes><key><fifths>0</fifths></key><time><beats>2</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '<note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '<barline location="right"><ending number="1" type="start"/><repeat direction="backward"/></barline>' +
+            '</measure>' +
+            '<measure number="3"><attributes><key><fifths>0</fifths></key><time><beats>2</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '<note><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '<barline location="right"><ending number="2" type="stop"/><repeat direction="backward"/></barline>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            const m1 = notes.filter(n => n.mIdx === 1);
+            const m2 = notes.filter(n => n.mIdx === 2);
+            assert.ok(m1.length > 0, 'first ending visited at least once');
+            assert.ok(m2.length > 0, 'second ending visited at least once');
+        });
+    });
+
+    // Helper integration: dotted length math + tie shape on real OSMD notes
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type><dot/></note>' +
+            '<note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            assert.near(window.PTHelpers.getNoteEffectiveLength(notes[0].note), 0.375, 1e-9, 'dotted quarter via OSMD');
+            assert.near(window.PTHelpers.getNoteEffectiveLength(notes[1].note), 0.25, 1e-9, 'plain quarter via OSMD');
+        });
+    });
+
+    __osmdTests.push(() => {
+        const xml = wrapFullScore(
+            '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths><mode>major</mode></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type><notations><tied type="start"/></notations></note>' +
+            '<note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type><notations><tied type="stop"/></notations></note>' +
+            '</measure>'
+        );
+        return loadOsmd(xml).then(o => {
+            const notes = collectVoiceEntries(o);
+            const tieA = window.PTHelpers.getNoteTie(notes[0].note);
+            const tieB = window.PTHelpers.getNoteTie(notes[1].note);
+            assert.ok(tieA, 'first note has tie');
+            assert.ok(tieB, 'second note has tie');
+            assert.eq(tieA.StartNote, notes[0].note);
+            assert.eq(tieA.EndNote, notes[1].note);
+            assert.eq(tieB.NextNote, null);
+            assert.eq(tieA.NextNote, notes[1].note);
+        });
+    });
+
+    __osmdTests.forEach(fn => testAsync('OSMD: ' + (fn.name || fn.toString().slice(0, 60)), fn));
+
+    return __asyncPromises.length ? Promise.allSettled(__asyncPromises) : Promise.resolve();
+}
+
+const __asyncPromises = [];
+function testAsync(name, fn) {
+    const p = Promise.resolve()
+        .then(fn)
+        .then(() => {
+            __passed++;
+            __results.push({ group: __currentGroup, name, pass: true });
+        })
+        .catch(e => {
+            __failed++;
+            __results.push({ group: __currentGroup, name, pass: false, err: String(e && e.stack || e) });
+        });
+    __asyncPromises.push(p);
+}
+
+function render() {
+    const meta = document.getElementById('meta');
+    const sum = document.getElementById('summary');
+    const out = document.getElementById('results');
+    out.innerHTML = '';
+
+    const groups = {};
+    for (const r of __results) (groups[r.group] ||= []).push(r);
+
+    sum.className = 'summary ' + (__failed ? 'fail' : 'pass');
+    sum.textContent = __failed
+        ? (__failed + ' failed, ' + __passed + ' passed')
+        : ('All ' + __passed + ' tests passed');
+
+    for (const [gname, items] of Object.entries(groups)) {
+        const h = document.createElement('h2');
+        h.textContent = gname;
+        out.appendChild(h);
+        const ol = document.createElement('ol');
+        ol.className = 'tests';
+        for (const r of items) {
+            const li = document.createElement('li');
+            li.className = 'test ' + (r.pass ? 'pass' : 'fail');
+            li.innerHTML = '<span class="name">' + (r.pass ? '✓' : '✗') + ' ' + r.name + '</span>'
+                + (r.err ? '<span class="err">' + r.err + '</span>' : '');
+            ol.appendChild(li);
+        }
+        out.appendChild(ol);
+    }
+    meta.textContent = 'Modules: PTHelpers, PTTiming, TransposeEngine, PTFullscreen, PTMode, PTTransport, PTLooperState, PTPlayback, PTKeyboardInput. ' + new Date().toLocaleTimeString();
+}
+
+async function main() {
+    document.getElementById('rerun').addEventListener('click', async () => { await runTests(); render(); });
+    try {
+        await loadModules();
+        await runTests();
+        render();
+    } catch (e) {
+        document.getElementById('summary').className = 'summary fail';
+        document.getElementById('summary').textContent = 'Load failure: ' + e.message;
+    }
+}
+
+main();
+</script>
+</body>
+</html>

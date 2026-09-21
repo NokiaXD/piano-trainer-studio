@@ -9,6 +9,7 @@
     <title>Piano Trainer Studio</title>
 
     <meta name="theme-color" content="#05070d">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Piano Trainer Studio">
     <link rel="icon" type="image/x-icon" href="assets/icons/favicon.ico">
@@ -16,87 +17,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="assets/icons/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon.png">
     <link rel="manifest" href="site.webmanifest">
-
-    <script>
-        (function () {
-            const FALLBACK_ASSET_VERSION = '1.2.4';
-            const OVERRIDE_KEY = 'pt_assetVersionOverride';
-            const VERSION_JSON_PATH = 'version.json';
-            let assetVersion = FALLBACK_ASSET_VERSION;
-            let versionManifest = null;
-
-            function compareSemverLoose(a, b) {
-                const parse = (value) => String(value || '')
-                    .trim()
-                    .replace(/^[^\d]*/, '')
-                    .split(/[\.-]/)
-                    .map(part => {
-                        const n = Number(part);
-                        return Number.isFinite(n) ? n : 0;
-                    });
-                const aa = parse(a);
-                const bb = parse(b);
-                const len = Math.max(aa.length, bb.length, 3);
-                for (let i = 0; i < len; i++) {
-                    const av = aa[i] || 0;
-                    const bv = bb[i] || 0;
-                    if (av > bv) return 1;
-                    if (av < bv) return -1;
-                }
-                return 0;
-            }
-
-            function pickNewestVersion() {
-                const candidates = Array.prototype.slice.call(arguments)
-                    .map(value => String(value || '').trim())
-                    .filter(Boolean);
-                if (!candidates.length) return FALLBACK_ASSET_VERSION;
-                return candidates.reduce((latest, candidate) => {
-                    if (!latest) return candidate;
-                    return compareSemverLoose(candidate, latest) > 0 ? candidate : latest;
-                }, '');
-            }
-
-            let requestedVersion = '';
-            let storedVersion = '';
-            try {
-                const url = new URL(window.location.href);
-                requestedVersion = String(url.searchParams.get('appv') || '').trim();
-                storedVersion = String(localStorage.getItem(OVERRIDE_KEY) || '').trim();
-                assetVersion = pickNewestVersion(assetVersion, requestedVersion, storedVersion);
-            } catch (_) {}
-
-            try {
-                const request = new XMLHttpRequest();
-                const cacheBustedPath = VERSION_JSON_PATH + '?t=' + Date.now();
-                request.open('GET', cacheBustedPath, false);
-                request.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-                request.setRequestHeader('Pragma', 'no-cache');
-                request.send(null);
-
-                if (request.status >= 200 && request.status < 300) {
-                    versionManifest = JSON.parse(request.responseText || '{}');
-                    const jsonVersion = String(versionManifest.version || '').trim();
-                    assetVersion = pickNewestVersion(assetVersion, jsonVersion);
-                }
-            } catch (_) {}
-
-            window.__PT_APP_MANIFEST__ = versionManifest || {};
-            window.__PT_ASSET_VERSION__ = assetVersion;
-
-            function writeStyle(href) {
-                document.write('<link rel="stylesheet" href="' + href + '?v=' + encodeURIComponent(assetVersion) + '">');
-            }
-
-            function writeScript(src) {
-                document.write('<script src="' + src + '?v=' + encodeURIComponent(assetVersion) + '"><\/script>');
-            }
-
-            writeStyle('style.css');
-            writeScript('assets/js/Tone.js');
-            writeScript('assets/js/opensheetmusicdisplay.min.js');
-        })();
-    </script>
+    <link rel="stylesheet" href="style.css" data-app-css>
 </head>
 <body>
 
@@ -184,44 +105,7 @@
                 <section class="info-panel-section">
                     <p><strong>Advanced setup (LEDs, iPad, hardware):</strong> <a href="README.html" target="_blank" rel="noopener noreferrer">Full Setup Guide / README</a></p>
                 </section>
-
-                <section class="info-panel-section">
-                    <h3>Practice Modes</h3>
-                    <ul>
-                        <li><strong>Realtime</strong> — Play continuously at the set tempo.</li>
-                        <li><strong>Wait for Me</strong> — Waits for correct notes before continuing.</li>
-                        <li><strong>Follow Me</strong> — Play one hand while the app follows with the other.</li>
-                    </ul>
-                    <p><strong>Tip:</strong> Start with <em>Wait for Me</em> to learn notes, then try <em>Follow Me</em> to practice with timing.</p>
-                </section>
-
-                <section class="info-panel-section">
-                    <h3>Quick Start</h3>
-                    <ul>
-                        <li>Open a score from the Scores menu, or add your own files to the library.</li>
-                        <li><strong>Best results:</strong> MusicXML / MXL.</li>
-                        <li><strong>Also supported:</strong> MIDI, MuseScore (3.x), and Guitar Pro (5.x) files. These are experimental, and MIDI does not include all notation details.</li>
-                        <li>Connect your MIDI keyboard in Settings.</li>
-                        <li>On iPad / iPhone, use <a href="https://midiweb.cc" target="_blank" rel="noopener noreferrer">midiweb.cc</a> for MIDI input support.</li>
-                        <li>LED output is optional. See the setup guide for hardware and setup details.</li>
-                        <li>Starter songs are added on first run and can be deleted.</li>
-                        <li>Browse free starter songs at <a href="https://musetrainer.github.io/library/" target="_blank" rel="noopener noreferrer">musetrainer.github.io/library</a>.</li>
-                    </ul>
-                </section>
-
-                <section class="info-panel-section">
-                    <h3>Library &amp; Backups</h3>
-                    <ul>
-                        <li>Your score library is stored in your browser. Back it up if it matters to you.</li>
-                        <li>Use <strong>Scores → Backup Library</strong> to back up your song library.</li>
-                        <li>Use <strong>Settings → Backup All Settings</strong> to save trainer preferences, connections, and LED calibration.</li>
-                    </ul>
-                </section>
-
-                <section class="info-panel-section">
-                    <h3>Important Note</h3>
-                    <p>Some browsers, especially on mobile or low-storage devices, may clear local site data over time. Back up your library and LED calibration if the data matters to you.</p>
-                </section>
+                <div id="help-body-fragment" data-src="quick-start.html"></div>
             </div>
 
             <div class="info-panel-footer">
@@ -784,18 +668,6 @@
         <input type="file" id="input-led-calibration-import" accept=".json,application/json" class="hidden">
     </div>
 
-    <script>document.write('<script src="js/trainer-state.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/transpose/transpose-engine.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/transpose/transpose-ui.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/toolbar-ui.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/score-library.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/scores-ui.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/led.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/midi.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/midi-import.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/feedback-engine.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/feedback-debug.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/trainer-timing.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
-    <script>document.write('<script src="js/trainer-core.js?v=' + encodeURIComponent(window.__PT_ASSET_VERSION__ || 'dev') + '"><\/script>');</script>
+    <script src="js/app-boot.js"></script>
 </body>
 </html>

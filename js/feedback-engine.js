@@ -551,8 +551,8 @@ const GeometryEngine = {
         const group = this.getFeedbackGroup();
         if (!group) return;
 
-        const assignedHandRole = window.getAssignedHandRoleForStaff?.(note.staffId);
-        if (window.getAssignedHandRoleForStaff && !assignedHandRole) return;
+        const assignedHandRole = window.PTMode?.getAssignedHandRoleForStaff?.(note.staffId);
+        if (window.PTMode?.getAssignedHandRoleForStaff && !assignedHandRole) return;
         let anchor = note.anchor;
         if (!anchor && note.sourceNote) {
             const staffIdx = window.getVisibleStaffIndexForAssignmentId
@@ -730,12 +730,12 @@ function renderLooper() {
 
 function enforceLooperBounds() {
     if (!document.getElementById('check-looper').checked || !osmd.cursor) return;
-    
+
     const minLoop = AppState.looper.min;
     const maxLoop = AppState.looper.max;
-    const current = osmd.cursor.Iterator.CurrentMeasureIndex + 1;
-    
-    if (current < minLoop || current > maxLoop) {
+    const currentMeasureIdx0 = osmd.cursor.Iterator.CurrentMeasureIndex;
+
+    if (!window.PTLooperState.isMeasureInLooperBounds(currentMeasureIdx0, minLoop, maxLoop)) {
         osmd.cursor.reset();
         while (!osmd.cursor.Iterator.EndReached && osmd.cursor.Iterator.CurrentMeasureIndex < minLoop - 1) {
             osmd.cursor.Iterator.moveToNext();
@@ -1082,42 +1082,6 @@ function findExpectedMatchForMidi(midi) {
     return chosen;
 }
 
-//editing function buildexpectednotefromentries to let playback ring through tied notes//
-function getCombinedTieLength(note) {
-    if (!note) return 0;
-
-    let total = 0;
-    let current = note;
-    const seen = new Set();
-
-    while (current && !seen.has(current)) {
-        seen.add(current);
-
-        if (current.Length && typeof current.Length.RealValue === 'number') {
-            total += current.Length.RealValue;
-        }
-
-        const tie = current.NoteTie;
-        if (!tie) break;
-
-        // Prefer an explicit next note link if present
-        const next =
-            tie.Notes?.find(n => n !== current) ||
-            tie.NextNote ||
-            tie.nextNote ||
-            null;
-
-        if (!next) break;
-
-        // Only combine true same-pitch ties
-        if (next.halfTone !== current.halfTone) break;
-
-        current = next;
-    }
-
-    return total || (note.Length?.RealValue ?? 0);
-}
-
 function buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx, currentTimestamp = null) {
     if (!AppState.scoreNoteNamesEnabled || !osmd?.GraphicSheet?.MeasureList || !Number.isFinite(currentMeasureIdx)) return [];
 
@@ -1151,11 +1115,11 @@ function buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx, currentTime
                         if (note.Notehead === 'none' || note.PrintObject === false || note.isCueNote === true) continue;
                         if (!Number.isFinite(Number(note.halfTone))) continue;
 
-                        const staffId = window.getResolvedStaffAssignmentIdFromNote?.(note) ?? Number(note.ParentStaff?.id);
-                        const handRole = window.getAssignedHandRoleForStaff?.(staffId);
+                        const staffId = window.PTStaff?.getResolvedStaffAssignmentIdFromNote?.(note) ?? Number(note.ParentStaff?.id);
+                        const handRole = window.PTMode?.getAssignedHandRoleForStaff?.(staffId);
                         if (!handRole) continue;
 
-                        const timing = window.getMeasureTimingInfo ? window.getMeasureTimingInfo(mIdx) : null;
+                        const timing = window.PTTiming?.getMeasureTimingInfo ? window.PTTiming.getMeasureTimingInfo(osmd, mIdx) : null;
                         const measureStart = Number.isFinite(timing?.startTimestamp) ? timing.startTimestamp : 0;
                         const noteRelTimestamp = note.ParentVoiceEntry?.Timestamp?.RealValue;
                         const noteAbsTimestamp = Number.isFinite(noteRelTimestamp) ? (measureStart + noteRelTimestamp) : null;
@@ -1215,8 +1179,8 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
     const mergedOutOfRange = new Map();
 
     entries.forEach(e => {
-        const sid = window.getResolvedStaffAssignmentIdFromEntry ? window.getResolvedStaffAssignmentIdFromEntry(e) : Number(e.Notes[0]?.ParentStaff?.id);
-        const handRole = window.getAssignedHandRoleForStaff ? window.getAssignedHandRoleForStaff(sid) : null;
+        const sid = window.PTStaff?.getResolvedStaffAssignmentIdFromEntry ? window.PTStaff.getResolvedStaffAssignmentIdFromEntry(e) : Number(e.Notes[0]?.ParentStaff?.id);
+        const handRole = window.PTMode?.getAssignedHandRoleForStaff ? window.PTMode.getAssignedHandRoleForStaff(sid) : null;
         const isRH = handRole === 'right';
         const isLH = handRole === 'left';
         const isPracticingThisHand = (isRH && AppState.practice.right) || (isLH && AppState.practice.left);
@@ -1259,7 +1223,8 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
                 }
 
                 if (!n.isRest()) {
-                    const isTieContinuation = n.NoteTie && n.NoteTie.StartNote !== n;
+                    const nt = window.PTHelpers.getNoteTie(n);
+                    const isTieContinuation = nt && nt.StartNote !== n;
 
                     if (!isTieContinuation) {
                         const midi = n.halfTone + 12;
@@ -1272,9 +1237,9 @@ function buildExpectedNotesFromEntries(entries, currentMeasureIdx, currentTimest
                             return;
                         }
 
-                        const combinedLength = (n.NoteTie && n.NoteTie.StartNote === n)
-                            ? getCombinedTieLength(n)
-                            : n.Length.RealValue;
+                        const combinedLength = (nt && nt.StartNote === n)
+                            ? window.PTPlayback.getCombinedTieLength(n)
+                            : window.PTHelpers.getNoteEffectiveLength(n);
 
                         const noteDurationSeconds = (combinedLength * 4) * (60 / (AppState.baseBpm * AppState.speedPercent));
                         const durationMs = noteDurationSeconds * 1000;

@@ -216,8 +216,14 @@ const btnMoreHelp = document.getElementById('btn-more-help');
 if (btnMoreHelp && helpOverlay) {
     btnMoreHelp.addEventListener('click', (e) => {
         e.stopPropagation();
-        launchFromMore(helpOverlay);
+        Promise.resolve(loadHelpFragmentOnce()).then(() => launchFromMore(helpOverlay));
     });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => loadHelpFragmentOnce());
+} else {
+    loadHelpFragmentOnce();
 }
 
 function isAnyToolbarPanelOpen() {
@@ -272,9 +278,11 @@ function showFirstRunIntro() {
     if (!helpOverlay) return;
     firstRunQuickStartActive = true;
     hideToolbarPanels(true);
-    showToolbarPanel(helpOverlay);
-    const helpBody = helpOverlay.querySelector('.info-panel-body');
-    if (helpBody) helpBody.scrollTop = 0;
+    Promise.resolve(loadHelpFragmentOnce()).then(() => {
+        showToolbarPanel(helpOverlay);
+        const helpBody = helpOverlay.querySelector('.info-panel-body');
+        if (helpBody) helpBody.scrollTop = 0;
+    });
 }
 
 function closeFirstRunIntro() {
@@ -293,6 +301,26 @@ function maybeShowFirstRunIntro() {
     } catch (err) {}
     showFirstRunIntro();
     return true;
+}
+
+function loadHelpFragmentOnce() {
+    const slot = document.getElementById('help-body-fragment');
+    if (!slot || slot.dataset.loaded === 'true') return Promise.resolve();
+    slot.dataset.loaded = 'true';
+    const src = slot.dataset.src;
+    if (!src) return Promise.resolve();
+    return fetch(src, { cache: 'no-cache' })
+        .then(r => r.ok ? r.text() : '')
+        .then(html => {
+            if (!html) return;
+            const tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            while (tmp.firstChild) slot.appendChild(tmp.firstChild);
+        })
+        .catch(err => {
+            console.warn('Help fragment load failed', err);
+            slot.dataset.loaded = 'false';
+        });
 }
 
 window.ToolbarUI = {

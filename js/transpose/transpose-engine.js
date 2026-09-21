@@ -169,16 +169,17 @@
         const fifths = Number.parseInt(getFirstText(keyNode, 'fifths'), 10);
         const mode = (getFirstText(keyNode, 'mode') || 'major').toLowerCase() === 'minor' ? 'minor' : 'major';
         const majorInfo = MAJOR_KEY_BY_FIFTHS[String(fifths)] || null;
+        const tonicInfo = tonicFromKeySignature(fifths, mode);
         const presetValue = Number.isFinite(fifths) ? `sig-${fifths}` : null;
         const inferredPreset = presetValue ? KEY_PRESET_BY_VALUE.get(presetValue) || null : null;
         return {
-            found: Number.isFinite(fifths) && !!majorInfo,
+            found: Number.isFinite(fifths) && !!tonicInfo,
             label: getGroupedLabelForFifths(fifths),
             mode,
-            tonic: majorInfo?.tonic ?? null,
+            tonic: tonicInfo?.tonic ?? null,
             fifths: Number.isFinite(fifths) ? fifths : null,
             presetValue,
-            bias: majorInfo?.bias || (Number(fifths) < 0 ? 'flat' : 'sharp'),
+            bias: tonicInfo?.bias || (Number(fifths) < 0 ? 'flat' : 'sharp'),
             inferredPreset
         };
     }
@@ -287,7 +288,9 @@
             if (!detectedKey.found || detectedKey.tonic == null) {
                 throw new Error('This score does not expose a readable key signature. Use semitones for this score.');
             }
-            semitoneDelta = mod(targetPreset.tonic - detectedKey.tonic, 12);
+            const targetTonicInfo = tonicFromKeySignature(targetPreset.fifths, detectedKey.mode);
+            const targetTonic = targetTonicInfo?.tonic ?? targetPreset.tonic;
+            semitoneDelta = mod(targetTonic - detectedKey.tonic, 12);
             if (semitoneDelta > 6) semitoneDelta -= 12;
         }
 

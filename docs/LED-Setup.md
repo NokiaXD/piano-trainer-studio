@@ -178,9 +178,10 @@ If future notes don’t appear → increase slightly
 
 Run helper:
 
-Launchers/Windows/WLED Helper - Low Latency (DDP).bat
+`Windows Launchers/WLED Helper - Low Latency (DDP).bat`
+(or `Mac Launchers/WLED Helper - Low Latency (DDP).command`)
 
-- Faster response  
+- Faster response
 - Better for advanced setups  
 
 ⚠️ Notes:

@@ -2,6 +2,8 @@
 
 Practice piano with real-time MIDI feedback, scoring, and optional LED guidance.
 
+Current release: **v1.2.4** (see `version.json`)
+
 ---
 
 ## 🌐 Try It
@@ -53,18 +55,19 @@ You can download and run Piano Trainer Studio locally without cloning the reposi
 ## ✨ Features
 
 - 🎼 Load and play **MusicXML / MXL** piano scores
-- 🔄 Import **MIDI, MuseScore 3.x, and Guitar Pro files 5.x** (auto-converted to MusicXML)
+- 🔄 Import **MIDI, MuseScore 3.x, and Guitar Pro files 5.x** (auto-converted to MusicXML in-browser)
 - 🎹 Real-time **MIDI keyboard feedback**
 - 💡 Optional **LED visualization (WLED or MIDI LED devices)**
 - 🌐 Runs in your browser — no install required
 - 📱 iPad/iPhone support via MIDIWeb
-- ⏱️ Various trainer modes
+- ⏱️ Practice modes (Realtime / Wait for Me / Follow Me)
+- 🎵 Transpose by key or semitone
 
 ## 🎹 Practice Modes
 
-- **Realtime** — play continuously at the set tempo
+- **Realtime** — play continuously at the set tempo (allows slight early grace)
 - **Wait for Me** — waits for correct notes before continuing
-- **Follow Me** — play one hand while the app follows with the other
+- **Follow Me** — play one hand while the app follows with the other (adaptive timing)
 
 *Tip: Start with Wait for Me to learn notes, then try Follow Me to practice with timing.*
 
@@ -79,9 +82,9 @@ https://nodejs.org/en
 
 ### 2. Run the app
 Open:
-`Launchers/Windows/Piano Trainer - Desktop.bat`
+`Windows Launchers/Piano Trainer - Desktop.bat`
 
-(or Mac equivalent)
+(or `Mac Launchers/Piano Trainer - Desktop.command`)
 
 ### 3. Connect your MIDI keyboard
 - USB recommended
@@ -98,6 +101,7 @@ Open:
 
 ### ℹ️ Notes
 - No additional libraries need to be installed — all dependencies (including Tone.js) are already included
+- See [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for versions and licenses of bundled libraries.
 - If nothing opens, check the terminal/command window for errors
 - On Mac, you may need to allow the `.command` file in System Settings → Security
 
@@ -136,8 +140,8 @@ iOS browsers do not support MIDI.
 
 **WLED light strips** will NOT work on iOS without a helper.
 - Open the following on a Mac/PC on your local network:
-- `Launchers/Windows/Piano Trainer - iPad (Wi-Fi).bat`
-- (or Mac equivalent)
+- `Windows Launchers/Piano Trainer - iPad (Wi-Fi).bat`
+- (or `Mac Launchers/Piano Trainer - iPad (Wi-Fi).command`)
 - Using the MIDIWeb app, connect to the resulting URL/IP displayed on your Mac/PC browser
 - Be sure to use **http** (NOT https) when putting this URL into MIDIWeb
 
@@ -189,8 +193,9 @@ LEDs are optional but provide powerful real-time visual guidance while practicin
 
 **DDP (low latency)**
 - Run:
-  `Launchers/Windows/WLED Helper - Low Latency (DDP).bat`
-- Faster response  
+  `Windows Launchers/WLED Helper - Low Latency (DDP).bat`
+  (or `Mac Launchers/WLED Helper - Low Latency (DDP).command`)
+- Faster response
 - Not supported on iPad  
 
 ---
@@ -253,11 +258,12 @@ Songs are stored in your browser (IndexedDB).
 
 ## ⚙️ Key Controls
 
-- **Practice Menu** — core training modes and feedback
+- **Practice** — practice modes + staff feedback (red wrong / gold correct) + future note lighting
 - **Tempo** — speed + metronome
-- **Loop** — repeat sections
-- **Display** — zoom, virtual keyboard
+- **Loop** — repeat sections with optional count-in
+- **Settings → Display** — zoom, virtual keyboard, fullscreen toggle
 - **Transpose** — key or semitone changes
+- **Settings → Connections** — MIDI In/Out, LED Lights (None / MIDI Device / WLED), WLED IP + LED count + transport (HTTP JSON / DDP)
 
 ---
 
@@ -316,13 +322,16 @@ Songs are stored in your browser (IndexedDB).
 
 ## 🙌 Credits
 
-- OSMD
+- OpenSheetMusicDisplay (2.1.3, BSD-3-Clause)
 - WLED
 - MIDIWeb
 - MuseTrainer Library
-- Node.js
-- Tone.js
-- Webmscore
+- Node.js (WLED DDP helper)
+- Tone.js (15.5.42, MIT)
+- Webmscore (vendored, MPL-2.0)
+- Salamander Grand Piano V2 (CC-BY 3.0, Alexander Holm)
+
+See [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for full version + license table.
 
 ---
 

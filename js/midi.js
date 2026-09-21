@@ -4,7 +4,7 @@
 // Does not own trainer scoring, rendering, or playback scheduling.
 
 // ⚠️ WARNING:
-// MIDI input events must continue to flow through triggerVirtualKey() so the
+// MIDI input events must continue to flow through window.keyboardInput() so the
 // existing realtime/wait logic, scoring, feedback notes, and audio behavior stay aligned.
 
 let midiAccess = null;
@@ -243,8 +243,8 @@ document.getElementById('midi-in').addEventListener('change', (e) => {
             }
 
             const cmd = status & 0xF0;
-            if (cmd === 0x90 && vel > 0) triggerVirtualKey(note, true, 'midi', vel);
-            else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) triggerVirtualKey(note, false, 'midi', vel);
+            if (cmd === 0x90 && vel > 0) window.keyboardInput(note, true, 'midi', vel);
+            else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) window.keyboardInput(note, false, 'midi', vel);
         };
     } else {
         activeMidiInput = null;
@@ -291,7 +291,7 @@ document.getElementById('midi-lights-channel').addEventListener('change', (e) =>
     localStorage.setItem(MIDI_LIGHTS_CHANNEL_STORAGE_KEY, String(nextChannel));
     wipeHardwareLEDs();
     MidiLedTestController.stop({ statusText: document.getElementById('midi-lights')?.value === 'none' ? 'Select an LED MIDI device first.' : 'MIDI LED idle.' });
-    if (typeof renderVirtualKeyboard === 'function') renderVirtualKeyboard();
+    if (typeof window.PTVirtualKeyboard?.renderVirtualKeyboard === 'function') window.PTVirtualKeyboard.renderVirtualKeyboard();
 });
 
 document.getElementById('midi-lights').addEventListener('change', (e) => {
@@ -305,7 +305,7 @@ document.getElementById('midi-lights').addEventListener('change', (e) => {
     wipeHardwareLEDs(); 
     MidiLedTestController.stop({ statusText: e.target.value === 'none' ? 'Select an LED MIDI device first.' : 'MIDI LED idle.' });
     updateConnectionStatuses();
-    renderVirtualKeyboard(); 
+    window.PTVirtualKeyboard.renderVirtualKeyboard(); 
     MidiLedTestController.syncControls();
 });
 
@@ -318,7 +318,7 @@ if (midiLedLowVelocityCheckbox && !midiLedLowVelocityCheckbox.dataset.boundMidiL
         setStoredBool(MIDI_LED_LOW_VELOCITY_STORAGE_KEY, AppState.midiLedLowVelocity);
         if (AppState.ledOutputMode === 'midi') {
             wipeHardwareLEDs();
-            if (typeof renderVirtualKeyboard === 'function') renderVirtualKeyboard();
+            if (typeof window.PTVirtualKeyboard?.renderVirtualKeyboard === 'function') window.PTVirtualKeyboard.renderVirtualKeyboard();
         }
     });
 }
@@ -409,7 +409,7 @@ const MidiLedTestController = {
         this.isRunning = false;
         this.updateButton();
         AppState.hardwareLEDState.clear();
-        if (typeof renderVirtualKeyboard === 'function') renderVirtualKeyboard();
+        if (typeof window.PTVirtualKeyboard?.renderVirtualKeyboard === 'function') window.PTVirtualKeyboard.renderVirtualKeyboard();
         this.setStatus(statusText);
     },
 

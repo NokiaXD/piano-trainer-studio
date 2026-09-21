@@ -206,10 +206,10 @@ const ScoreLibrary = {
         const now = Date.now();
         const score = {
             id: makeLibraryId(),
-            title: String(title || getScoreDisplayTitle(fileName || '') || 'Untitled Score').trim() || 'Untitled Score',
+            title: String(title || window.PTHelpers.getScoreDisplayTitle(fileName || '') || 'Untitled Score').trim() || 'Untitled Score',
             folderId: folderId || null,
             fileName: fileName || 'Untitled Score.xml',
-            fileType: fileType || getScoreFileTypeFromName(fileName || ''),
+            fileType: fileType || window.PTHelpers.getScoreFileTypeFromName(fileName || ''),
             rawData,
             createdAt: now,
             updatedAt: now,
@@ -326,10 +326,10 @@ const ScoreLibrary = {
             scores.forEach(score => {
                 scoreStore.put({
                     id: makeLibraryId(),
-                    title: String(score.title || getScoreDisplayTitle(score.fileName || '') || 'Untitled Score').trim() || 'Untitled Score',
+                    title: String(score.title || window.PTHelpers.getScoreDisplayTitle(score.fileName || '') || 'Untitled Score').trim() || 'Untitled Score',
                     folderId: folderIdMap.get(score.folderId) || null,
                     fileName: score.fileName || 'Imported Score.xml',
-                    fileType: score.fileType || getScoreFileTypeFromName(score.fileName || ''),
+                    fileType: score.fileType || window.PTHelpers.getScoreFileTypeFromName(score.fileName || ''),
                     rawData: deserializeScoreRawData(score.rawData),
                     createdAt: Number(score.createdAt) || Date.now(),
                     updatedAt: Date.now(),

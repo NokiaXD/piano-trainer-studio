@@ -21,7 +21,8 @@ const ALLOWED_ROOT_PATHS = new Set([
   "README.html",
   "README.md",
   "quick-start.html",
-  "site.webmanifest"
+  "site.webmanifest",
+  "tests.html"
 ]);
 
 const MIME_TYPES = {

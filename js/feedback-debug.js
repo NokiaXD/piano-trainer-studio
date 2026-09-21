@@ -34,10 +34,10 @@ window.FeedbackDebug = window.FeedbackDebug || {
             staffId: note?.ParentStaff?.id ?? null,
             midi: note?.halfTone != null ? note.halfTone + 12 : null,
             halfTone: note?.halfTone ?? null,
-            length: note?.Length?.RealValue ?? null,
+            length: window.PTHelpers.getNoteEffectiveLength(note),
             timestamp: voice?.Timestamp?.RealValue ?? null,
             isRest: !!(note?.isRest && note.isRest()),
-            hasTie: !!note?.NoteTie
+            hasTie: !!window.PTHelpers.getNoteTie(note)
         };
     },
 
