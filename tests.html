@@ -683,6 +683,14 @@ function runTests() {
             assert.deepEq(ids, [1, 2, 3]);
         });
 
+        test('resolves global ids 3/4 for a second instrument whose staff.id restarts at 1', () => {
+            const inst1 = { Staves: [{ id: 1 }, { id: 2 }] };
+            const inst2 = { Staves: [{ id: 1 }, { id: 2 }] };
+            window.PTStaff.rebuildGlobalStaffIdentityMap({ Sheet: { Instruments: [inst1, inst2] } });
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromNote({ ParentStaff: inst2.Staves[0] }), 3);
+            assert.eq(window.PTStaff.getResolvedStaffAssignmentIdFromNote({ ParentStaff: inst2.Staves[1] }), 4);
+        });
+
         test('returns empty map when osmd has no instruments', () => {
             const map = window.PTStaff.rebuildGlobalStaffIdentityMap({});
             assert.eq(map.size, 0);
@@ -747,6 +755,15 @@ function runTests() {
         test('returns -1 when no match', () => {
             const tl = [{ measureIndex: 0, timestamp: 0, signature: 'a' }];
             assert.eq(window.PTLedPreview.findMatchingLedPreviewTimelineIndex(tl, 0, 0, 'b'), -1);
+        });
+
+        test('matches floating point timestamps of eighth and sixteenth notes within epsilon', () => {
+            const tl = [
+                { measureIndex: 0, timestamp: 0, signature: 'a' },
+                { measureIndex: 0, timestamp: 0.125, signature: 'b' },
+                { measureIndex: 0, timestamp: 0.18750000000000003, signature: 'c' }
+            ];
+            assert.eq(window.PTLedPreview.findMatchingLedPreviewTimelineIndex(tl, 0, 0.1875, 'c'), 2);
         });
     });
 

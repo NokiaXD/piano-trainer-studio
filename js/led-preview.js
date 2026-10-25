@@ -32,9 +32,16 @@
     function findMatchingLedPreviewTimelineIndex(timeline, measureIndex, timestamp, signature, startIndex = 0) {
         if (!Array.isArray(timeline) || timeline.length === 0) return -1;
 
-        for (let i = Math.max(0, startIndex); i < timeline.length; i++) {
+        const eps = 0.0001;
+        const fromIdx = Math.max(0, startIndex);
+
+        for (let i = fromIdx; i < timeline.length; i++) {
             const event = timeline[i];
-            if (event.measureIndex === measureIndex && event.timestamp === timestamp && event.signature === signature) {
+            const matchMeasure = event.measureIndex === measureIndex;
+            const matchTime = (event.timestamp == null && timestamp == null) ||
+                (Number.isFinite(event.timestamp) && Number.isFinite(timestamp) && Math.abs(event.timestamp - timestamp) < eps);
+            const matchSig = signature == null || event.signature === signature;
+            if (matchMeasure && matchTime && matchSig) {
                 return i;
             }
         }

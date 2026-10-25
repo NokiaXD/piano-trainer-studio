@@ -3203,30 +3203,59 @@ body.app-fullscreen-active .score-overlay-controls {
 .practice-feedback-list .note-name-depth-control {
     padding-left: 24px;
     font-size: 0.88rem;
-    color: #cbd5e1;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.practice-feedback-list .note-name-depth-control span {
+    color: #1e293b;
+    font-weight: 600;
 }
 
 .practice-feedback-list .note-name-depth-control input.num-input {
     width: 48px;
     text-align: center;
+    color: #0f172a;
+    font-weight: 600;
+    background: #ffffff;
+    border: 1px solid #94a3b8;
+    border-radius: 4px;
+    padding: 3px 6px;
 }
 
-.note-name-system-btn {
+.note-name-system-btn,
+.btn-note-name-system,
+#btn-note-name-system {
     appearance: none;
-    background: #1e293b;
-    color: #f1f5f9;
-    border: 1px solid #334155;
+    background: #ffffff;
+    color: #0f172a;
+    border: 1px solid #94a3b8;
     border-radius: 6px;
-    padding: 5px 12px;
-    font-size: 0.82rem;
-    font-weight: 500;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    align-self: flex-start;
+    margin-top: 2px;
+    margin-bottom: 2px;
 }
 
-.note-name-system-btn:hover {
-    background: #334155;
+.note-name-system-btn:hover,
+.btn-note-name-system:hover,
+#btn-note-name-system:hover {
+    background: #f1f5f9;
     border-color: #475569;
+    color: #020617;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.note-name-system-btn:active,
+.btn-note-name-system:active,
+#btn-note-name-system:active {
+    background: #e2e8f0;
+    border-color: #3b82f6;
 }
 
 #fs-practice-popup .practice-divider {

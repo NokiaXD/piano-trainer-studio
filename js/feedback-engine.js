@@ -1119,8 +1119,9 @@ function buildScoreNoteLabelsFromEntries(entries, currentMeasureIdx, currentTime
                         const handRole = window.PTMode?.getAssignedHandRoleForStaff?.(staffId);
                         if (!handRole) continue;
 
-                        const timing = window.PTTiming?.getMeasureTimingInfo ? window.PTTiming.getMeasureTimingInfo(osmd, mIdx) : null;
-                        const measureStart = Number.isFinite(timing?.startTimestamp) ? timing.startTimestamp : 0;
+                        const timing = window.PTTiming?.getMeasureTimingInfo ? window.PTTiming.getMeasureTimingInfo(osmd, mIdx) : (window.getMeasureTimingInfo ? window.getMeasureTimingInfo(mIdx) : null);
+                        const fallbackStart = (Number(mIdx) || 0) * (timing?.nominalMeasureLengthWhole || 1);
+                        const measureStart = Number.isFinite(timing?.startTimestamp) ? timing.startTimestamp : fallbackStart;
                         const noteRelTimestamp = note.ParentVoiceEntry?.Timestamp?.RealValue;
                         const noteAbsTimestamp = Number.isFinite(noteRelTimestamp) ? (measureStart + noteRelTimestamp) : null;
 

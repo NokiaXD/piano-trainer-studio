@@ -137,7 +137,12 @@ async function setupMIDI() {
             refreshConnectionStatuses();
             syncMidiInputConfigVisibility();
             syncMidiOutChannelVisibility();
-            midiAccess.onstatechange = () => {
+            midiAccess.onstatechange = (event) => {
+                const lostActiveInput = event?.port && activeMidiInput && event.port.id === activeMidiInput.id;
+                if (lostActiveInput) {
+                    activeMidiInput = null;
+                    if (typeof releaseAllPressedKeys === 'function') releaseAllPressedKeys();
+                }
                 populateMIDIDevices();
                 refreshConnectionStatuses();
                 syncMidiInputConfigVisibility();
@@ -224,6 +229,7 @@ document.getElementById('midi-in').addEventListener('change', (e) => {
         localStorage.removeItem(MIDI_IN_NAME_STORAGE_KEY);
     }
     if (activeMidiInput) activeMidiInput.onmidimessage = null;
+    if (typeof releaseAllPressedKeys === 'function') releaseAllPressedKeys();
     
     if (e.target.value !== 'none') {
         activeMidiInput = midiAccess.inputs.get(e.target.value);

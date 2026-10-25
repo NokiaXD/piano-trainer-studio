@@ -787,6 +787,9 @@ function rebuildWaitModeMetronome(measureIndex = waitMetronomeActiveMeasureIndex
 }
 
 function getMeasureTimingInfo(measureIndex) {
+    if (window.PTTiming?.getMeasureTimingInfo && osmd) {
+        return window.PTTiming.getMeasureTimingInfo(osmd, measureIndex);
+    }
     const measure = osmd?.Sheet?.SourceMeasures?.[measureIndex] || null;
     const cached = measureTimingCache[measureIndex] || null;
     const activeTimeSignature = measure?.ActiveTimeSignature || osmd?.Sheet?.SourceMeasures?.[0]?.ActiveTimeSignature || null;
@@ -794,7 +797,8 @@ function getMeasureTimingInfo(measureIndex) {
     const denominator = Math.max(1, Number(activeTimeSignature?.Denominator) || 4);
     const beatLengthWhole = 1 / denominator;
     const nominalMeasureLengthWhole = numerator * beatLengthWhole;
-    const startTimestamp = Number.isFinite(cached?.startTimestamp) ? cached.startTimestamp : 0;
+    const fallbackStart = (Number(measureIndex) || 0) * nominalMeasureLengthWhole;
+    const startTimestamp = Number.isFinite(cached?.startTimestamp) ? cached.startTimestamp : fallbackStart;
 
     return {
         numerator,
@@ -807,6 +811,12 @@ function getMeasureTimingInfo(measureIndex) {
 }
 
 function rebuildMeasureTimingCache() {
+    if (window.PTTiming?.rebuildMeasureTimingCache && osmd) {
+        const result = window.PTTiming.rebuildMeasureTimingCache(osmd, restoreCursorToMeasureAndTimestamp);
+        measureTimingCache = result;
+        return result;
+    }
+
     const cursor = osmd?.cursor;
     if (!cursor?.Iterator) {
         measureTimingCache = [];
@@ -1545,6 +1555,11 @@ function bindHandAssignmentControls() {
 
 function initSongUI() {
     rebuildGlobalStaffIdentityMap();
+    // OSMD's Staff.id restarts at 1 for every instrument, so a multi-instrument
+    // score never reports global ids 3/4 and hands assigned to those staves get
+    // zero expected notes (wait/follow then never waits). PTStaff's map is the
+    // global one and is what the note resolution in feedback-engine reads.
+    window.PTStaff?.rebuildGlobalStaffIdentityMap?.(osmd);
     rebuildMeasureTimingCache();
 
     const totalMeasures = osmd.GraphicSheet.MeasureList.length;
@@ -1819,7 +1834,7 @@ function isRenderableAttackNote(note) {
 
     if (isInvisibleCue) return false;
 
-    const tie = note.NoteTie;
+    const tie = window.PTHelpers.getNoteTie ? window.PTHelpers.getNoteTie(note) : note.tie;
     const isTieContinuation = !!(tie && tie.StartNote && tie.StartNote !== note);
     if (isTieContinuation) return false;
 
@@ -1834,11 +1849,12 @@ function describeEntryCollectionForLedDebug(entries, measureIndex = null, timest
     const notes = [];
     entries.forEach(entry => {
         (entry.Notes || []).forEach(note => {
+            const tie = window.PTHelpers.getNoteTie ? window.PTHelpers.getNoteTie(note) : note.tie;
             notes.push({
                 staffId: getResolvedStaffAssignmentIdFromNote(note),
                 midi: note?.halfTone != null ? note.halfTone + 12 : null,
                 isRest: !!(note?.isRest && note.isRest()),
-                isTieContinuation: !!(note?.NoteTie && note.NoteTie.StartNote && note.NoteTie.StartNote !== note)
+                isTieContinuation: !!(tie && tie.StartNote && tie.StartNote !== note)
             });
         });
     });
@@ -1872,14 +1888,19 @@ function collectRenderablePreviewNotesFromEntries(entries, previewDepthIndex) {
 }
 
 function makeLedPreviewEntrySignature(entries) {
+    if (window.PTLedPreview?.makeLedPreviewEntrySignature) {
+        return window.PTLedPreview.makeLedPreviewEntrySignature(entries);
+    }
+
     const parts = [];
 
     (entries || []).forEach(entry => {
         (entry?.Notes || []).forEach(note => {
             const staffId = Number(note?.ParentStaff?.id) || 0;
             const midi = note?.halfTone != null ? note.halfTone + 12 : 'rest';
-            const length = note?.Length?.RealValue ?? 'na';
-            const tieState = (note?.NoteTie && note.NoteTie.StartNote && note.NoteTie.StartNote !== note) ? 'tiecont' : 'attack';
+            const length = window.PTHelpers.getNoteEffectiveLength(note) || 'na';
+            const nt = window.PTHelpers.getNoteTie(note);
+            const tieState = (nt && nt.StartNote && nt.StartNote !== note) ? 'tiecont' : 'attack';
             const restFlag = (note?.isRest && note.isRest()) ? 'rest' : 'note';
             parts.push(`${staffId}:${midi}:${length}:${tieState}:${restFlag}`);
         });
@@ -1909,10 +1930,14 @@ function restoreCursorToMeasureAndTimestamp(targetMeasureIndex, targetTimestamp)
 
     const safetyMax = 100000;
     let safety = 0;
+    const eps = 0.0001;
     while (!osmd.cursor.Iterator.EndReached && safety < safetyMax) {
         const measureIndex = osmd.cursor.Iterator.CurrentMeasureIndex;
         const timestamp = osmd.cursor.Iterator.currentTimeStamp?.RealValue ?? null;
-        if (measureIndex === targetMeasureIndex && timestamp === targetTimestamp) {
+        const matchMeasure = measureIndex === targetMeasureIndex;
+        const matchTime = (targetTimestamp == null && timestamp == null) ||
+            (Number.isFinite(targetTimestamp) && Number.isFinite(timestamp) && Math.abs(timestamp - targetTimestamp) < eps);
+        if (matchMeasure && matchTime) {
             break;
         }
         osmd.cursor.Iterator.moveToNext();
@@ -1966,11 +1991,21 @@ function ensureLedPreviewTimelineBuilt() {
 }
 
 function findMatchingLedPreviewTimelineIndex(timeline, measureIndex, timestamp, signature, startIndex = 0) {
+    if (window.PTLedPreview?.findMatchingLedPreviewTimelineIndex) {
+        return window.PTLedPreview.findMatchingLedPreviewTimelineIndex(timeline, measureIndex, timestamp, signature, startIndex);
+    }
+
     if (!Array.isArray(timeline) || timeline.length === 0) return -1;
 
-    for (let i = Math.max(0, startIndex); i < timeline.length; i++) {
+    const eps = 0.0001;
+    const fromIdx = Math.max(0, startIndex);
+    for (let i = fromIdx; i < timeline.length; i++) {
         const event = timeline[i];
-        if (event.measureIndex === measureIndex && event.timestamp === timestamp && event.signature === signature) {
+        const matchMeasure = event.measureIndex === measureIndex;
+        const matchTime = (event.timestamp == null && timestamp == null) ||
+            (Number.isFinite(event.timestamp) && Number.isFinite(timestamp) && Math.abs(event.timestamp - timestamp) < eps);
+        const matchSig = signature == null || event.signature === signature;
+        if (matchMeasure && matchTime && matchSig) {
             return i;
         }
     }
@@ -1988,7 +2023,11 @@ function resolveLedPreviewTraversalIndex(currentEntries, currentMeasureIdx, curr
 
     if (currentIndex >= 0 && currentIndex < timeline.length) {
         const currentEvent = timeline[currentIndex];
-        if (currentEvent.measureIndex === currentMeasureIdx && currentEvent.timestamp === currentTimestamp && currentEvent.signature === signature) {
+        const eps = 0.0001;
+        const matchMeasure = currentEvent.measureIndex === currentMeasureIdx;
+        const matchTime = (currentEvent.timestamp == null && currentTimestamp == null) ||
+            (Number.isFinite(currentEvent.timestamp) && Number.isFinite(currentTimestamp) && Math.abs(currentEvent.timestamp - currentTimestamp) < eps);
+        if (matchMeasure && matchTime && currentEvent.signature === signature) {
             return currentIndex;
         }
     }
@@ -2023,14 +2062,6 @@ function collectFutureLedPreviewEvents(currentEntries, currentMeasureIdx, curren
     if (!timeline.length || currentIndex < 0) {
         for (let i = 0; i < requestedDepth; i++) {
             debugLogEvent(`LED_FUTURE_${i + 1}_SELECTED`, { skipped: true, reason: 'timeline-index-unresolved' });
-        }
-        return [];
-    }
-
-    const currentEvent = timeline[currentIndex];
-    if (!currentEvent?.notes?.length) {
-        for (let i = 0; i < requestedDepth; i++) {
-            debugLogEvent(`LED_FUTURE_${i + 1}_SELECTED`, { skipped: true, reason: 'current-event-has-no-renderable-attacks' });
         }
         return [];
     }
@@ -2406,6 +2437,7 @@ function clearFeedbackVisualStatePreserveScoring() {
 }
 
 function clearVisuals() {
+    releaseAllPressedKeys();
     clearFeedbackVisualStatePreserveScoring();
     AppState.activeTimeouts.forEach(id => clearTimeout(id));
     AppState.activeTimeouts = [];
@@ -2469,6 +2501,9 @@ function createKeyboard() {
         if (key.dataset.virtualDown === '1') return;
         key.dataset.virtualDown = '1';
         await ensureLiveAudioReady();
+        // The release can land while we waited on audio readiness. Pressing now
+        // would light a key nobody is holding, and nothing would ever clear it.
+        if (key.dataset.virtualDown !== '1') return;
         if (activeVirtualPointerMidi != null && activeVirtualPointerMidi !== midi) {
             releaseActiveVirtualPointer();
         }
@@ -2829,6 +2864,17 @@ function triggerVirtualKey(midi, isPressed, source = 'midi', velocity = 100) {
     }
     
     renderVirtualKeyboard();
+}
+
+// ponytail: pressedKeys had no force-release path, so a lost note-off (MIDI
+// disconnect, input switch, stop) kept that tile lit forever. Add when a
+// device needs per-note reconnect bookkeeping instead of a blunt release-all.
+function releaseAllPressedKeys() {
+    const held = Array.from(AppState.pressedKeys);
+    held.forEach(midi => triggerVirtualKey(midi, false, 'system'));
+    AppState.pressedKeys.clear();
+    AppState.heldCorrectNotes.clear();
+    AppState.preExpectedHeldNotes.clear();
 }
 
 
@@ -4430,6 +4476,7 @@ startLedPulseLoop();
 
 
 window.syncTrainerRoutingUiState = syncTrainerRoutingUiState;
+window.keyboardInput = triggerVirtualKey;
 
 
 

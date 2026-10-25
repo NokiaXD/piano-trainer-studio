@@ -20,7 +20,8 @@
         const denominator = Math.max(1, Number(activeTimeSignature?.Denominator) || 4);
         const beatLengthWhole = 1 / denominator;
         const nominalMeasureLengthWhole = numerator * beatLengthWhole;
-        const startTimestamp = Number.isFinite(cached?.startTimestamp) ? cached.startTimestamp : 0;
+        const fallbackStart = (Number(measureIndex) || 0) * nominalMeasureLengthWhole;
+        const startTimestamp = Number.isFinite(cached?.startTimestamp) ? cached.startTimestamp : fallbackStart;
 
         return {
             numerator,
